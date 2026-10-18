@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "status": "preservation_snapshot_not_standalone_plugin",
+  "source_repository": "https://github.com/RS3-Dev/bank-utilities",
+  "source_commit": "beba274b57853d444c7017eaa9c813273f222475",
+  "source_branch": "refactor/extensibility-plan",
+  "extraction_branch": "extraction/preserved-bank-features",
+  "feature_roots": [
+    "lib/features/runesql/query_editor",
+    "lib/features/runesql/query_page",
+    "lib/features/runesql/query_store",
+    "lib/features/search/bank_name_search",
+    "lib/features/search/name_search_page",
+    "lib/features/search/query_item_fields",
+    "lib/features/search/catalog_objects"
+  ],
+  "files": [
+    {
+      "path": "STYLE_GUIDE.md",
+      "source_path": "STYLE_GUIDE.md",
+      "role": "style_guide",
+      "bytes": 4394,
+      "sha256": "4ddf968beccf7c15434e986c845f8fcf81ae212dc353dca7b71f70783937ffc1"
+    },
+    {
+      "path": "lib/core/bank_interface.lua",
+      "source_path": "lib/core/bank_interface.lua",
+      "role": "shared_dependency",
+      "bytes": 791,
+      "sha256": "b82ebf16705c89907ec811bf85686e76a8cc89c0bb59bbc821edef6e0eb2ffd2"
+    },
+    {
+      "path": "lib/core/chunked_string_store.lua",
+      "source_path": "lib/core/chunked_string_store.lua",
+      "role": "shared_dependency",
+      "bytes": 2807,
+      "sha256": "9c455796fbdec10d243404cbe516f41ba7eb1aab03898e792069935edbf91fa1"
+    },
+    {
+      "path": "lib/core/config.lua",
+      "source_path": "lib/core/config.lua",
+      "role": "shared_dependency",
+      "bytes": 1104,
+      "sha256": "db2f930713bef93133cb25f001a09a21eb5bf5bbc162b3a70ba9be27096753d0"
+    },
+    {
+      "path": "lib/core/debug_log.lua",
+      "source_path": "lib/core/debug_log.lua",
+      "role": "shared_dependency",
+      "bytes": 568,
+      "sha256": "cc883e319f5ca3629a5721f309eb133741a23d424998423bb5b9193164c31fb3"
+    },
+    {
+      "path": "lib/core/json.lua",
+      "source_path": "lib/core/json.lua",
+      "role": "shared_dependency",
+      "bytes": 6659,
+      "sha256": "379b0813ec713fbb188eeba9855cfde181c1f35e7f9ba88f95258e65ac4a4d05"
+    },
+    {
+      "path": "lib/core/object_config.lua",
+      "source_path": "lib/core/object_config.lua",
+      "role": "shared_dependency",
+      "bytes": 1493,
+      "sha256": "5a331ed34a7da6628d97e8415b8ef764b8bc2f1e22b04e49bba67bc851b91bf7"
+    },
+    {
+      "path": "lib/core/text.lua",
+      "source_path": "lib/core/text.lua",
+      "role": "shared_dependency",
+      "bytes": 716,
+      "sha256": "5d1926d967eb7aa2eb08bd430504ae48401c8b7095f26c3b74f43ba620cc362c"
+    },
+    {
+      "path": "lib/features/runesql/query_editor.lua",
+      "source_path": "lib/features/runesql/query_editor.lua",
+      "role": "feature",
+      "bytes": 5897,
+      "sha256": "bcfa883545c1b258fa5780bf842f0e4449375ded596c702448c600d199e40da5"
+    },
+    {
+      "path": "lib/features/runesql/query_page.lua",
+      "source_path": "lib/features/runesql/query_page.lua",
+      "role": "feature",
+      "bytes": 2259,
+      "sha256": "23144c51b46ebf5bfa2b354e4670b2c7bca92cbfa93b2bb46aa6ef4092b85853"
+    },
+    {
+      "path": "lib/features/runesql/query_store.lua",
+      "source_path": "lib/features/runesql/query_store.lua",
+      "role": "feature",
+      "bytes": 9322,
+      "sha256": "98e2b01d273f1c46d0104b8b89bb0887f8ca915812f6b2daf27bbfa2b0adb37b"
+    },
+    {
+      "path": "lib/features/search/bank_name_search.lua",
+      "source_path": "lib/features/search/bank_name_search.lua",
+      "role": "feature",
+      "bytes": 10875,
+      "sha256": "30ca1225022aed5526ae8f9f025b7ec261efa823c004afafa6d1e36cfde59b20"
+    },
+    {
+      "path": "lib/features/search/catalog_objects.lua",
+      "source_path": "lib/features/search/catalog_objects.lua",
+      "role": "feature",
+      "bytes": 1068,
+      "sha256": "b9dca0bbca318f65896e39efd9f288893a7198fa60c9b878d08cafdd57472eb7"
+    },
+    {
+      "path": "lib/features/search/name_search_page.lua",
+      "source_path": "lib/features/search/name_search_page.lua",
+      "role": "feature",
+      "bytes": 1261,
+      "sha256": "b8c402b0b75ee06af0bf0422101f36f8af606a7cc51093de41a83b6e3b0805ec"
+    },
+    {
+      "path": "lib/features/search/query_item_fields.lua",
+      "source_path": "lib/features/search/query_item_fields.lua",
+      "role": "feature",
+      "bytes": 2892,
+      "sha256": "b1a1831d1f0e62fbe4c140989e880f88cdc7c9489e9f180af32fda388cccd86e"
+    },
+    {
+      "path": "lib/features/storage_keys.lua",
+      "source_path": "lib/features/storage_keys.lua",
+      "role": "shared_dependency",
+      "bytes": 1113,
+      "sha256": "06afd4bad20b1ccdbd1283a4d98bb8c5b7c490119b720eb44cd3365ecd0e3760"
+    },
+    {
+      "path": "reference/HOST_CONTRACT.md",
+      "source_path": "HOST_CONTRACT.md",
+      "role": "host_contract_reference",
+      "bytes": 51015,
+      "sha256": "c6eb4f156dc4788d92d10966964de23a2fdfbbe8ce491fabbe5d68a10d714ec3"
+    },
+    {
+      "path": "reference/integration/lib/core/app.lua",
+      "source_path": "lib/core/app.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 15628,
+      "sha256": "605b59224e030217ec6f14bba439d60bfbee503e1cdbb1c28f5e2206b671a175"
+    },
+    {
+      "path": "reference/integration/lib/core/settings.lua",
+      "source_path": "lib/core/settings.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 1623,
+      "sha256": "42e4748478f74dc139c038bb7f8503abc3fb0b80131462300fc0eef559d659f2"
+    },
+    {
+      "path": "reference/integration/lib/core/standalone_windows.lua",
+      "source_path": "lib/core/standalone_windows.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 14922,
+      "sha256": "a186a7f8c06a04eaecc95890b0ae2da906969c329f42b80fac5e72ae7347a801"
+    },
+    {
+      "path": "reference/integration/lib/features/bank_features.lua",
+      "source_path": "lib/features/bank_features.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 13163,
+      "sha256": "130bccba1050d8f88486b1c40cba77d4b54bad28012c596d2415c158f4018a95"
+    },
+    {
+      "path": "reference/integration/lib/features/settings/plugin_panel.lua",
+      "source_path": "lib/features/settings/plugin_panel.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 7743,
+      "sha256": "a3af10bd58a5aa0cd09614e3176ea1f8e913a7ebacf23c03400669c37a190365"
+    },
+    {
+      "path": "reference/integration/lib/features/storage_keys.lua",
+      "source_path": "lib/features/storage_keys.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 1113,
+      "sha256": "06afd4bad20b1ccdbd1283a4d98bb8c5b7c490119b720eb44cd3365ecd0e3760"
+    },
+    {
+      "path": "reference/integration/lib/features/tags/sidebar_tabs.lua",
+      "source_path": "lib/features/tags/sidebar_tabs.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 1773,
+      "sha256": "d28069c584dc4aaf00a0a90ef1e404927a48e1e2a9d51bcec496fdb08494bbe8"
+    },
+    {
+      "path": "reference/integration/lib/features/tags/tag_menu.lua",
+      "source_path": "lib/features/tags/tag_menu.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 13565,
+      "sha256": "b036b5e4b3243c19bc49226d1ef274828e0dcc6ba8ba099ec934a5986b747a04"
+    },
+    {
+      "path": "reference/integration/lib/features/tags/tag_sidebar.lua",
+      "source_path": "lib/features/tags/tag_sidebar.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 32928,
+      "sha256": "5e83ef5577dd2bae50e2918c38045a5bb73a454b96b9edc093eadc6d84120dd2"
+    },
+    {
+      "path": "reference/integration/plugins/bankutils/main.lua",
+      "source_path": "plugins/bankutils/main.lua",
+      "role": "mixed_integration_reference",
+      "bytes": 3136,
+      "sha256": "74eb1eb41121339a3ef2cf80df1c7595f2016cda1d20a1f4a02b74967509a9cf"
+    },
+    {
+      "path": "reference/integration/plugins/bankutils/plugin.json",
+      "source_path": "plugins/bankutils/plugin.json",
+      "role": "mixed_integration_reference",
+      "bytes": 362,
+      "sha256": "cc46e3ea48f3697499d01288113d3cde3a65e3fad4a02b3bb6cb04be0312913d"
+    },
+    {
+      "path": "reference/tests/bank_page_lifecycle_test.lua",
+      "source_path": "tests/bank_page_lifecycle_test.lua",
+      "role": "integration_test_reference",
+      "bytes": 22413,
+      "sha256": "1ef22fcbe9d9638a3d7d6128746e70dac44496c39608837ee98966cca84087eb"
+    },
+    {
+      "path": "reference/tests/name_search_page_test.lua",
+      "source_path": "tests/name_search_page_test.lua",
+      "role": "integration_test_reference",
+      "bytes": 8109,
+      "sha256": "8976a6730eb46941419a8a9a27428e9769145e1b4f46bd4ed7e3be1346c0be83"
+    },
+    {
+      "path": "reference/tests/query_page_test.lua",
+      "source_path": "tests/query_page_test.lua",
+      "role": "integration_test_reference",
+      "bytes": 8209,
+      "sha256": "f9f8b720661050a81f774f81e9c36edcc793752030b072511df03ef1575d4aec"
+    },
+    {
+      "path": "tests/catalog_objects_test.lua",
+      "source_path": "tests/catalog_objects_test.lua",
+      "role": "independent_test",
+      "bytes": 2055,
+      "sha256": "01ed357aa2c5ad07562a683edb6748a860a93a7732c646c93f28efef236d8cc3"
+    }
+  ]
+}
