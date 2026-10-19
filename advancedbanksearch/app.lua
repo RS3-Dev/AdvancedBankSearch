@@ -9,6 +9,7 @@ local QueryEditor = require("advancedbanksearch/search/query_editor")
 local QueryStore = require("advancedbanksearch/search/query_store")
 local Ranking = require("advancedbanksearch/search/ranking")
 local SearchTab = require("advancedbanksearch/search/search_tab")
+local TagSource = require("advancedbanksearch/search/tag_source")
 
 local App = {}
 App.__index = App
@@ -94,6 +95,8 @@ function App.new()
         shutDown = false,
     }, App)
     app.tab = SearchTab.new(app)
+    -- The import source Bank Tags lists while it is loaded
+    app.tagSource = TagSource.new(app)
     if app.queries.loadError ~= nil then app:ShowStatus(app.queries.loadError, true) end
     return app
 end
@@ -116,6 +119,7 @@ function App:Start()
     self.started = true
     Event.ContentLayerReady.Subscribe(CONTENT_EVENT, function(event) self:CreatePanel(event.component) end)
     self:Connect()
+    self.tagSource:Connect()
 end
 
 -- Report whether this plugin's owner is registered with a running Bank Core
@@ -160,6 +164,7 @@ function App:Connect()
         self:Disconnect()
         return false, failure
     end
+    self.tagSource:Update()
     self:UpdatePanelNotice()
     return true
 end
@@ -172,6 +177,7 @@ function App:Disconnect()
     self.handle, self.bank = nil, nil
     self.snapshot, self.shownPage, self.shownKey, self.outcome, self.published = nil, nil, nil, nil, {}
     if handle ~= nil then pcall(function() handle:Dispose() end) end
+    self.tagSource:Update()
     self:UpdatePanelNotice()
 end
 
@@ -190,7 +196,10 @@ function App:DependencyChanged(name, enabled)
         self:StopPriceWait()
         self.pricesFailed = nil
         self:RefreshPage()
+    elseif name == "banktags" then
+        if enabled then self.tagSource:Connect() else self.tagSource:Disconnect() end
     end
+    self.tagSource:Update()
     self:Refresh()
 end
 
@@ -555,6 +564,7 @@ function App:Shutdown()
     if self.started then Event.ContentLayerReady.Unsubscribe(CONTENT_EVENT) end
     pcall(function() self:DestroyPanel() end)
     pcall(function() self:Disconnect() end)
+    pcall(function() self.tagSource:Disconnect() end)
 end
 
 return App
