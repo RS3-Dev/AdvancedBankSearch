@@ -1,6 +1,6 @@
 -- Enrich query records with bank fields and optional price data
 
-local CatalogObjects = require("lib/features/search/catalog_objects")
+local ObjectConfig = require("advancedbanksearch/core/object_config")
 
 local QueryItemFields = {}
 
@@ -61,7 +61,7 @@ function QueryItemFields.Enricher(plan, service)
         if item.objectID ~= nil then
             configName = configNames[item.objectID]
             if configName == nil then
-                configName = CatalogObjects.ConfigName(item.objectID) or false
+                configName = ObjectConfig.ConfigName(item.objectID) or false
                 configNames[item.objectID] = configName
             end
         end

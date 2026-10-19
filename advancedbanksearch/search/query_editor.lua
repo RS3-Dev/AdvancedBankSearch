@@ -1,6 +1,6 @@
 -- Edit saved query names and expressions without owning bank rendering
 
-local QueryStore = require("lib/features/runesql/query_store")
+local QueryStore = require("advancedbanksearch/search/query_store")
 
 local QueryEditor = {}
 QueryEditor.__index = QueryEditor

@@ -1,10 +1,20 @@
 -- Persist saved query records while RuneQL owns parsing and evaluation
 
-local StorageKeys = require("lib/features/storage_keys")
-local ChunkedStringStore = require("lib/core/chunked_string_store")
-local Json = require("lib/core/json")
-local Text = require("lib/core/text")
-local trim = Text.trim
+local ChunkedStringStore = require("advancedbanksearch/core/chunked_string_store")
+local Json = require("advancedbanksearch/core/json")
+
+-- The keys and limits the integrated plugin's shared storage-keys module named
+local StorageKeys = {
+    RUNESQL_KEY = "bankutils:runesql:v1",
+    RUNESQL_TEXT_MANIFEST_KEY = "bankutils:runesql:text:v1:manifest",
+    RUNESQL_TEXT_CHUNK_PREFIX = "bankutils:runesql:text:v1:",
+    LONG_INPUT_LIMIT = 9999,
+}
+
+-- Remove surrounding spaces from text supplied by the user
+local function trim(value)
+    return tostring(value or ""):match("^%s*(.-)%s*$")
+end
 
 local QueryStore = {}
 QueryStore.__index = QueryStore
