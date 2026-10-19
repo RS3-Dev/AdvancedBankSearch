@@ -59,8 +59,9 @@ function Harness.PrettyUIRoot()
     return root
 end
 
--- Load PrettyUI's real SpriteButton over the stand-in host's components, with its sprite
--- table, tooltips, and wheel binding from the stand-in widgets and a cursor that sets nothing
+-- Load PrettyUI's real SpriteButton over the stand-in host's components, with the tooltips
+-- already installed, its sprite table and wheel binding from the stand-in widgets, and a
+-- cursor that sets nothing
 function Harness.LoadSpriteButton(prettyRoot)
     config.Cursor = { CURSOR_BLANK = 1, CURSOR_INFO = 2 }
     ui.Interfaces.GetInterface = function() return {} end
@@ -76,6 +77,52 @@ function Harness.LoadSpriteButton(prettyRoot)
     }
     local env = setmetatable({ require = function(name) return assert(stubs[name], name) end }, { __index = _G })
     return assert(loadfile(prettyRoot .. "/src/sprite_button.lua", "t", env))()
+end
+
+-- Load PrettyUI's real tooltips over the stand-in host's components, with no frame sprites
+function Harness.LoadTooltip(prettyRoot)
+    config.Font = config.Font or {}
+    local stubs = {
+        ["src/core/sprites"] = { CONTENT_FRAME = {} },
+        ["src/core/math"] = assert(loadfile(prettyRoot .. "/src/core/math.lua"))(),
+    }
+    local env = setmetatable({ require = function(name) return assert(stubs[name], name) end }, { __index = _G })
+    return assert(loadfile(prettyRoot .. "/src/tooltip.lua", "t", env))()
+end
+
+-- Let the stand-in components keep each named subscription to a hook beside the unnamed one,
+-- as the client does, so a tooltip's hover and a button's own both run. hooks[hook] still
+-- holds the latest subscription, as before
+function Harness.KeepNamedHooks()
+    for _, class in ipairs({ "Layer", "Rectangle", "Sprite", "Button", "Text" }) do
+        local new = ui[class].new
+        ui[class].new = function(...)
+            local node = new(...)
+            local subscribe, unsubscribe = node.Subscribe, node.Unsubscribe
+            node.subscriptions = {}
+            function node:Subscribe(hook, name, action)
+                local key = action ~= nil and name or ""
+                self.subscriptions[hook] = self.subscriptions[hook] or {}
+                self.subscriptions[hook][key] = action or name
+                return subscribe(self, hook, name, action)
+            end
+            function node:Unsubscribe(hook, name)
+                if self.subscriptions[hook] ~= nil then self.subscriptions[hook][name or ""] = nil end
+                return unsubscribe(self, hook)
+            end
+            return node
+        end
+    end
+end
+
+-- Run every subscription a component keeps to a hook, unnamed first, as the client does
+function Harness.Fire(node, hook, ...)
+    local subscriptions = node.subscriptions[hook] or {}
+    local names = {}
+    for name in pairs(subscriptions) do names[#names + 1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do subscriptions[name](node, ...) end
+    return #names
 end
 
 -- Install the stand-in host and widgets, build the plugin into dist/test/<name>, and create
@@ -106,7 +153,10 @@ function Harness.new(name, options)
         Subscribe = function(key, action) menuSubscriptions[key] = action end,
         Unsubscribe = function(key) menuSubscriptions[key] = nil end,
     }
-    -- Sprite buttons are PrettyUI's own, so the tab can call only what PrettyUI defines
+    -- Sprite buttons and tooltips are PrettyUI's own, so the tab can call only what PrettyUI
+    -- defines and its tooltip layers are really made and destroyed
+    Harness.KeepNamedHooks()
+    prettyui.Tooltip = Harness.LoadTooltip(Harness.PrettyUIRoot())
     prettyui.SpriteButton = Harness.LoadSpriteButton(Harness.PrettyUIRoot())
     Event.ContentLayerReady = {
         Subscribe = function(key, action) contentSubscriptions[key] = action end,

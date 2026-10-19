@@ -1,8 +1,11 @@
--- Draw the Search tab Bank Core mounts in its sidebar: the search field and the sort toggle,
+-- Draw the Search tab Bank Core mounts in its sidebar: the search field and the sort button,
 -- a status line shown only when there is something to say, the saved queries and their
 -- folders with each query's last count, and New, Edit, and Delete. The field keeps its
 -- control while the tab refreshes, so typing is never interrupted; a refresh moves the
--- status line and rows rather than rebuilding them
+-- status line and rows rather than rebuilding them. The field, sort button, and sorting
+-- follow Bank Tags' tag list
+
+local NativeButton = require("advancedbanksearch/search/native_button")
 
 local SearchTab = {}
 SearchTab.__index = SearchTab
@@ -12,6 +15,7 @@ local FIELD_TOP = 8
 local FIELD_HEIGHT = 26
 local SORT_SIZE = 26
 local SORT_GAP = 6
+local SORT_ICON_SIZE = 18
 local BODY_TOP = FIELD_TOP + FIELD_HEIGHT + 6
 local STATUS_LINE_HEIGHT = 16
 local STATUS_GAP = 4
@@ -57,19 +61,32 @@ function SearchTab:DestroyArrows()
     self.arrows = {}
 end
 
--- Destroy the column's controls; Bank Core destroys the layers they sit in
+-- Destroy the column's controls and its tooltip overlay; Bank Core destroys the layers they
+-- sit in
 function SearchTab:DestroyControls()
     self:DestroyArrows()
     local controls = self.controls
     self.controls = nil
     if controls == nil then return end
     for _, control in ipairs(controls.owned) do pcall(function() control:Destroy() end) end
+    pcall(function() prettyui.Tooltip.unregisterContext(controls.parent) end)
 end
 
--- Forget the column when Bank Core unmounts it
+-- Forget the column and stop sorting when Bank Core unmounts it
 function SearchTab:Unmount()
     self:DestroyControls()
     self.ctx = nil
+    self.sortMode = false
+end
+
+-- Add every parent offset to find a component's place in the window
+local function windowPosition(component)
+    local x, y = 0, 0
+    while component ~= nil do
+        x, y = x + (component.x or 0), y + (component.y or 0)
+        component = component.parent
+    end
+    return x, y
 end
 
 -- Add a click-through text line to the column
@@ -91,19 +108,28 @@ function SearchTab:Build()
     local bounds = ctx:GetBounds()
     local parent = ctx.parent
     local width = math.max(1, bounds.width - X * 2)
-    local controls = { owned = {}, width = width, height = bounds.height }
+    local controls = { parent = parent, owned = {}, width = width, height = bounds.height }
     local owned = controls.owned
+    -- Tooltips draw in the window-wide overlay so the column does not clip them
+    local overlay = ctx.overlay
+    prettyui.Tooltip.registerContext(parent, overlay, function(target)
+        local x, y = windowPosition(target)
+        local originX, originY = windowPosition(overlay)
+        return x - originX, y - originY
+    end)
     controls.field = prettyui.TextField.new(parent, {
         x = X, y = FIELD_TOP, width = math.max(1, width - SORT_SIZE - SORT_GAP), height = FIELD_HEIGHT,
         placeholder = "Search items with RuneQL...", text = app.text, maxLength = 9999,
-        onChange = function(_, _, content) app:SetText(content) end,
+        onChange = function(_, _, content)
+            -- Starting a search ends sorting
+            if tostring(content or "") ~= "" and self.sortMode then self:SetSortMode(false) end
+            app:SetText(content)
+        end,
     })
     owned[#owned + 1] = controls.field
-    -- A toggleable sprite button shows its disabled sprite while off and flips that state
-    -- itself when clicked, reporting whether it is now on
-    controls.sort = prettyui.SpriteButton.new(parent, "SWAP", function(_, on) self:SetSortMode(on) end, {
-        x = X + width - SORT_SIZE, y = FIELD_TOP, size = SORT_SIZE, tooltip = "Sort saved searches and folders",
-        toggleable = true, disabled = not self.sortMode,
+    controls.sort = NativeButton.new(parent, "SWAP", function() self:SetSortMode(not self.sortMode) end, {
+        x = X + width - SORT_SIZE, y = FIELD_TOP, size = SORT_SIZE, iconSize = SORT_ICON_SIZE,
+        tooltip = "Sort saved searches and folders",
     })
     owned[#owned + 1] = controls.sort
     controls.status = addText(parent, "", BODY_TOP, width, STATUS_LINE_HEIGHT, MUTED, 2)
@@ -113,8 +139,6 @@ function SearchTab:Build()
         x = X, y = BODY_TOP, width = width, height = ROW_HEIGHT, entryHeight = ROW_HEIGHT,
         maxSelected = 1, backgroundColour = 0x00000000, borderColour = 0x806432FF,
         selectedColour = 0x5A4526FF,
-        -- Rows do nothing while sorting, so an arrow the click passes through opens nothing
-        beforeEntryClick = function() return not self.sortMode end,
         _onEntryClick = function(_, entryID) self:Click(entryID) end,
     })
     owned[#owned + 1] = controls.list
@@ -138,27 +162,28 @@ function SearchTab:Build()
     self:Refresh()
 end
 
--- Open a query or toggle a folder from its row; while sorting, rows only redraw
+-- Open a query or toggle a folder from its row. While sorting, folders still open and close,
+-- and a query row only redraws, so nothing is chosen
 function SearchTab:Click(entryID)
     local info = self.rowInfo[entryID]
-    if self.sortMode or info == nil then
-        self:Refresh()
-    elseif info.kind == "folder" then
+    if info ~= nil and info.kind == "folder" then
         self.app:ToggleFolder(info.id)
+    elseif self.sortMode or info == nil then
+        self:Refresh()
     else
         self.app:ChooseQuery(info.id)
     end
 end
 
--- Turn sorting on or off
+-- Turn sorting on or off; the search text stays, since it does not filter the rows
 function SearchTab:SetSortMode(enabled)
     self.sortMode = enabled == true
     self:Refresh()
 end
 
--- Describe the rows: queries and folders in sidebar order, each expanded folder's queries
--- beneath it. Sorting expands every folder so each query can move. Each row's kind, ID, and
--- place among its siblings are kept by entry ID, since PrettyUI copies only its own fields
+-- Describe the rows: queries and folders in sidebar order, each open folder's queries beneath
+-- it. Each row's kind, ID, and place among its siblings are kept by entry ID, since PrettyUI
+-- copies only its own fields
 function SearchTab:Entries()
     local app = self.app
     local entries, rowInfo = {}, {}
@@ -178,7 +203,7 @@ function SearchTab:Entries()
         if node.kind == "query" then
             addQuery(node.query, false, index, #tree)
         else
-            local expanded = self.sortMode or not node.collapsed
+            local expanded = not node.collapsed
             local holdsSelected = false
             for _, record in ipairs(node.queries) do
                 if record.id == app.selectedQuery then holdsSelected = true end
@@ -221,11 +246,12 @@ local function addSelectedFrame(root)
     end
 end
 
--- Point a folder's chevron down when it is open and right when it is closed. The bank arrow
--- faces up and the host turns sprites anticlockwise; it may read any of these fields
-local function addChevron(root, expanded)
+-- Point a folder's chevron down when it is open and right when it is closed, left of any sort
+-- arrows. The bank arrow faces up and the host turns sprites anticlockwise; it may read any
+-- of these fields
+local function addChevron(root, expanded, rightInset)
     local chevron = ui.Sprite.new(root)
-    chevron:SetPos(-CHEVRON_RIGHT - CHEVRON_SIZE, math.floor((ROW_HEIGHT - CHEVRON_SIZE) / 2), 1.0, 0)
+    chevron:SetPos(-CHEVRON_RIGHT - CHEVRON_SIZE - rightInset, math.floor((ROW_HEIGHT - CHEVRON_SIZE) / 2), 1.0, 0)
     chevron:SetSize(CHEVRON_SIZE, CHEVRON_SIZE)
     chevron.spriteID = id.Sprite.BANK_ARROW_UP_0
     local radians = expanded and math.pi or math.pi * 1.5
@@ -243,10 +269,11 @@ end
 function SearchTab:DecorateRows()
     for _, row in ipairs(self.controls.list.rows or {}) do
         local info = self.rowInfo[row.entry.id]
-        local right = self.sortMode and ARROWS_WIDTH or 6
+        local arrowsWidth = self.sortMode and ARROWS_WIDTH or 0
+        local right = math.max(6, arrowsWidth)
         local left = ROW_LEFT
         if info.kind == "folder" then
-            addChevron(row.root, info.expanded)
+            addChevron(row.root, info.expanded, arrowsWidth)
             right = right + CHEVRON_RIGHT + CHEVRON_SIZE
         elseif info.inFolder then
             left = ROW_LEFT + FOLDER_INDENT
@@ -309,8 +336,9 @@ function SearchTab:Refresh()
     controls.list:SetEntries(entries)
     self:DecorateRows()
     controls.empty.hidden = #entries > 0
-    controls.sort:SetDisabled(not self.sortMode)
-    controls.sort:SetTooltip(self.sortMode and "Finish sorting" or "Sort saved searches and folders")
+    controls.sort:SetActive(self.sortMode)
+    controls.sort:SetTooltip(self.sortMode and "Finish sorting saved searches and folders"
+        or "Sort saved searches and folders")
     local searchable = app:RuneQL() ~= nil
     local selected = app.selectedQuery ~= nil and app.queries:Get(app.selectedQuery) ~= nil
     -- Set each control's state only when it changes, not on every keystroke

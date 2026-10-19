@@ -4,7 +4,10 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 -- the installed RuneQL: the status line taking room only while it has text, with the field
 -- kept; folder rows with their counts, chevrons, and indented queries; a folder opening and
 -- closing without changing the chosen query or the page; a closed folder outlined when it
--- holds the chosen query; sorting with arrows that never open a query; the row menus' folder
+-- holds the chosen query; the native sort button, its hover and tooltip in Bank Core's
+-- overlay, and sorting as in Bank Tags: folders that still open and close, arrows, queries
+-- that are never chosen, a search that ends sorting without interrupting typing, and the
+-- order kept across a resize and a remount; the row menus' folder
 -- actions and their dialogs, dropped when stale; refused saves; and cleanup on unload
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
@@ -57,15 +60,38 @@ end
 -- Compact layout ------------------------------------------------------------------------
 
 -- With nothing to say, the rows start just under the field, with no heading, and the sort
--- button sits at the field's right
+-- button sits at the field's right, as Bank Tags lays out its tag search
 local width = controls.width
 assert(controls.status.hidden and controls.list.root.y == 40, tostring(controls.list.root.y))
-assert(controls.field.options.width == width - 32 and controls.sort.root.x == 8 + width - 26)
--- The sort button is PrettyUI's real toggleable sprite button, off until clicked
-local swap = prettyui.Sprites.SPRITE_BUTTONS.SWAP
-assert(controls.sort.spriteName == "SWAP" and controls.sort.root.y == 8)
-assert(controls.sort.disabled and controls.sort.root.spriteID == swap.disabled)
+local fieldOptions = controls.field.options
+assert(fieldOptions.x == 8 and fieldOptions.y == 8 and fieldOptions.width == width - 32 and fieldOptions.height == 26)
+assert(fieldOptions.placeholder == "Search items with RuneQL..." and fieldOptions.maxLength == 9999)
 assert(Harness.Find(parent, "Saved searches") == nil)
+
+-- The sort button is Bank Tags' native one: a host button in the gold-bordered panel style,
+-- blank, enabled, and taking clicks, with the swap icon centred beside it, letting clicks
+-- through and unlit until hovered or sorting
+local swap = prettyui.Sprites.SPRITE_BUTTONS.SWAP
+local sort = controls.sort
+local button, icon = sort.root, sort.icon
+assert(button.parent == parent and icon.parent == parent)
+assert(button.x == 8 + width - 26 and button.y == 8 and button.width == 26 and button.height == 26)
+assert(button.stylesheetID == 318 and button.text.content == "")
+assert(button.enabled == nil and button.clickthrough == false and button.hidden == nil)
+assert(button.hooks[ui.Hook.ONBUTTONPRESSED] ~= nil and button.hooks[ui.Hook.ONCLICK] == nil)
+assert(icon.x == button.x + 4 and icon.y == 12 and icon.width == 18 and icon.height == 18)
+assert(icon.clickthrough == true and icon.spriteID == swap.neutral)
+-- Hovering lights the icon and shows the tooltip in Bank Core's overlay, outside the column;
+-- leaving unlights it and hides the tooltip
+local overlay = tab.ctx.overlay
+local tooltip = sort.tooltip
+assert(tooltip.root.parent == overlay and tooltip.root.hidden == true)
+assert(tooltip.label.content == "Sort saved searches and folders")
+assert(Harness.Fire(button, ui.Hook.ONMOUSEOVER) == 2)
+assert(icon.spriteID == swap.active and tooltip.root.hidden == false)
+assert(prettyui.Tooltip.getContext(parent).parent == overlay and prettyui.Tooltip.getContext(parent).tooltips[1] == tooltip)
+Harness.Fire(button, ui.Hook.ONMOUSELEAVE)
+assert(icon.spriteID == swap.neutral and tooltip.root.hidden == true)
 local idleHeight = controls.list.root.height
 assert(idleHeight == controls.height - 44 - 40 - 4, tostring(idleHeight))
 -- A status line pushes the rows down and shortens them by as much; the field is kept
@@ -137,11 +163,11 @@ app:Refresh()
 
 -- Sorting -------------------------------------------------------------------------------
 
--- Collapse Smithing first: sorting still shows its queries so they can move
-assert(app:ToggleFolder("1"))
-controls.sort.root.hooks.click()
-assert(tab.sortMode and not controls.sort.disabled and controls.sort.root.spriteID == swap.neutral)
-assert(rows() == "Smithing (2) | >Bars (1)* | >Ores | Fish | Empty (0)", rows())
+-- Press the sort button as the host reports it
+local function pressSort()
+    controls.sort.root.hooks[ui.Hook.ONBUTTONPRESSED]()
+    h:Tick(2)
+end
 -- Each row has an up and a down arrow at its right, past the label, disabled at its ends
 local function arrows(label)
     local found = {}
@@ -150,29 +176,97 @@ local function arrows(label)
     end
     return found.ARROW_UP, found.ARROW_DOWN
 end
+-- Find a folder row's chevron
+local function chevronOf(label)
+    for _, child in ipairs(rowNamed(label).root.children) do
+        if child.spriteID == id.Sprite.BANK_ARROW_UP_0 and not child.destroyed then return child end
+    end
+end
+
+-- Pressing the button starts sorting: its icon stays lit, still in the panel style, and the
+-- tooltip says how to finish. A closed folder stays closed, as in Bank Tags
+assert(app:ToggleFolder("1"))
+pressSort()
+assert(tab.sortMode and controls.sort == sort and button.stylesheetID == 318 and button.clickthrough == false)
+assert(icon.spriteID == swap.active and tooltip.label.content == "Finish sorting saved searches and folders")
+Harness.Fire(button, ui.Hook.ONMOUSELEAVE)
+assert(icon.spriteID == swap.active)
+assert(rows() == "Smithing (2)* | Fish | Empty (0)", rows())
 local up, down = arrows("Smithing (2)")
-assert(up.root.x == -50 and down.root.x == -28 and up.root.y == 5)
-assert(up.disabled and not down.disabled)
+assert(up.root.x == -50 and down.root.x == -28 and up.root.y == 5 and up.root.width == 20)
+assert(up.disabled and not down.disabled and up.root.clickthrough and not down.root.clickthrough)
+assert(#tab.arrows == 6)
+-- The chevron moves left of the arrows and the folder name stops before it
+assert(chevronOf("Smithing (2)").x == -22 - 50 and rowNamed("Smithing (2)").label.width == -8 - 50 - 22)
 assert(rowNamed("Fish").label.width == -8 - 50)
+-- A folder still opens and closes while sorting, so its queries can move, and the chosen query
+-- and its page stay
+assert(controls.list:Click("folder:1"))
+h:Tick(2)
+assert(not app.queries:GetFolder("1").collapsed and key() == "query:1" and app.selectedQuery == "1")
+assert(rows() == "Smithing (2) | >Bars (1)* | >Ores | Fish | Empty (0)", rows())
 local barsUp, barsDown = arrows("Bars (1)")
 assert(barsUp.disabled and not barsDown.disabled)
--- Clicking a row while sorting opens nothing
+-- Clicking a query while sorting chooses nothing, and the drawn selection stays
 assert(controls.list:Click("3"))
 h:Tick(2)
 assert(key() == "query:1" and app.selectedQuery == "1")
-assert(controls.list:Click("folder:1"))
-h:Tick(2)
-assert(app.queries:GetFolder("1").collapsed)
+assert(rows() == "Smithing (2) | >Bars (1)* | >Ores | Fish | Empty (0)", rows())
 -- Arrows move one step: queries within their folder, folders and loose queries at the top
 select(2, arrows("Bars (1)")).root.hooks.click()
 assert(rows() == "Smithing (2) | >Ores | >Bars (1)* | Fish | Empty (0)", rows())
 select(2, arrows("Smithing (2)")).root.hooks.click()
 assert(rows() == "Fish | Smithing (2) | >Ores | >Bars (1)* | Empty (0)", rows())
-assert(key() == "query:1")
--- Finishing shows Smithing closed again; the order is saved
-controls.sort.root.hooks.click()
-assert(not tab.sortMode and controls.sort.disabled and #tab.arrows == 0)
-assert(rows() == "Fish | Smithing (2)* | Empty (0)", rows())
+assert(key() == "query:1" and app.selectedQuery == "1")
+-- Finishing removes the arrows, unlights the icon, and puts the chevron back; the order stays
+pressSort()
+assert(not tab.sortMode and #tab.arrows == 0 and icon.spriteID == swap.neutral)
+assert(tooltip.label.content == "Sort saved searches and folders" and chevronOf("Smithing (2)").x == -22)
+assert(rows() == "Fish | Smithing (2) | >Ores | >Bars (1)* | Empty (0)", rows())
+
+-- Starting a search ends sorting, as in Bank Tags; the field is never rebuilt, so typing goes
+-- on, and the search runs
+field = controls.field
+pressSort()
+assert(tab.sortMode and #tab.arrows > 0)
+type("iron")
+assert(not tab.sortMode and #tab.arrows == 0 and icon.spriteID == swap.neutral)
+assert(controls.field == field and not field.root.destroyed and field:GetText() == "iron" and app.text == "iron")
+assert(app.shownPage == "search" and string.find(key(), "^search:"), tostring(key()))
+type("iron b")
+assert(controls.field == field and app.text == "iron b" and not tab.sortMode)
+-- Sorting keeps the search, since the search does not hide rows; clearing the field while
+-- sorting goes on sorting
+pressSort()
+assert(tab.sortMode and field:GetText() == "iron b" and app.text == "iron b" and app.shownPage == "search")
+type("")
+assert(tab.sortMode and app.shownPage == nil and controls.field == field)
+-- A resize rebuilds the column while sorting: the old button, icon, and tooltip layer are
+-- destroyed, and the overlay holds only the new button's tooltip
+tab.callbacks.resize()
+assert(tab.sortMode and button.destroyed and icon.destroyed and tooltip.root == nil)
+controls = tab.controls
+assert(controls.sort ~= sort and controls.sort.icon.spriteID == swap.active and #tab.arrows > 0)
+assert(#prettyui.Tooltip.getContext(parent).tooltips == 1)
+assert(prettyui.Tooltip.getContext(parent).tooltips[1] == controls.sort.tooltip)
+-- Unmounting ends sorting and removes the tooltip overlay; mounting again shows the saved order
+sort, tooltip = controls.sort, controls.sort.tooltip
+local tooltipRoot = tooltip.root
+local mounted = tab.ctx
+tab.callbacks.unmount()
+assert(not tab.sortMode and sort.root == nil and tooltipRoot.destroyed and prettyui.Tooltip.getContext(parent) == nil)
+tab.callbacks.mount(mounted)
+controls = tab.controls
+assert(not tab.sortMode and controls.sort.icon.spriteID == swap.neutral and #tab.arrows == 0)
+assert(rows() == "Fish | Smithing (2) | >Ores | >Bars (1)* | Empty (0)", rows())
+assert(getmetatable(app.queries).new():Tree()[1].query.name == "Fish")
+-- Show Bars again and close Smithing for the row menus
+assert(controls.list:Click("1"))
+assert(controls.list:Click("folder:1"))
+h:Tick(2)
+assert(key() == "query:1" and rows() == "Fish | Smithing (2)* | Empty (0)", rows())
+app:ShowStatus(nil)
+app:Refresh()
 
 -- Row menus -----------------------------------------------------------------------------
 
