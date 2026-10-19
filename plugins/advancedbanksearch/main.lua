@@ -11,5 +11,5 @@ if package ~= nil and package.loaded ~= nil then
     end
 end
 
-require("advancedbanksearch/search/item_fields")
+require("advancedbanksearch/search/ranking")
 require("advancedbanksearch/search/query_editor")

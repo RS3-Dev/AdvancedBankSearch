@@ -1,15 +1,9 @@
--- Persist saved query records while RuneQL owns parsing and evaluation
+-- Persist saved query records while RuneQL owns parsing and evaluation. Queries are saved as
+-- JSON text in this plugin's own keys; the integrated plugin's bankutils:runesql:* data is
+-- never read
 
 local ChunkedStringStore = require("advancedbanksearch/core/chunked_string_store")
 local Json = require("advancedbanksearch/core/json")
-
--- The keys and limits the integrated plugin's shared storage-keys module named
-local StorageKeys = {
-    RUNESQL_KEY = "bankutils:runesql:v1",
-    RUNESQL_TEXT_MANIFEST_KEY = "bankutils:runesql:text:v1:manifest",
-    RUNESQL_TEXT_CHUNK_PREFIX = "bankutils:runesql:text:v1:",
-    LONG_INPUT_LIMIT = 9999,
-}
 
 -- Remove surrounding spaces from text supplied by the user
 local function trim(value)
@@ -19,13 +13,13 @@ end
 local QueryStore = {}
 QueryStore.__index = QueryStore
 
-local SELECTION_PREFIX = "__bankutils_runesql:"
 local MAX_NAME_LENGTH = 40
-local MAX_QUERY_LENGTH = StorageKeys.LONG_INPUT_LIMIT
+local MAX_QUERY_LENGTH = 9999
 local TEXT_STORE = {
-    manifestKey = StorageKeys.RUNESQL_TEXT_MANIFEST_KEY,
-    chunkPrefix = StorageKeys.RUNESQL_TEXT_CHUNK_PREFIX,
+    manifestKey = "advancedbanksearch:queries:v1:manifest",
+    chunkPrefix = "advancedbanksearch:queries:v1:",
 }
+local UNREADABLE = "Your saved searches could not be read, so nothing is saved until this is fixed."
 
 -- Copy the supported fields of a saved query record
 local function copyRecord(record)
@@ -68,24 +62,27 @@ local function validate(name, query)
     return name, query, nil
 end
 
--- Decode the published chunked save, allowing missing or malformed storage
-local function loadTextData()
-    local encoded = ChunkedStringStore.Read(TEXT_STORE)
-    if encoded == nil then return nil end
-    local ok, decoded = pcall(Json.decode, encoded)
-    return ok and type(decoded) == "table" and decoded or nil
+-- Report whether a save was published, whether or not it can be read
+local function hasSave()
+    if PersistentDB == nil or PersistentDB.GetString == nil then return false end
+    local ok, value = pcall(function() return PersistentDB:GetString(TEXT_STORE.manifestKey) end)
+    return ok and type(value) == "string"
 end
 
--- Load current or legacy query storage and retain only valid unique query IDs
+-- Decode the published chunked save; nil with an error when a save exists but cannot be read
+local function loadTextData()
+    local encoded = ChunkedStringStore.Read(TEXT_STORE)
+    if encoded == nil then return nil, hasSave() and UNREADABLE or nil end
+    local ok, decoded = pcall(Json.decode, encoded)
+    if not ok or type(decoded) ~= "table" then return nil, UNREADABLE end
+    return decoded
+end
+
+-- Load the saved queries, retaining only valid unique query IDs. A save that cannot be read
+-- loads as empty with its error, and is never overwritten
 local function loadData()
-    local saved = loadTextData()
-    if type(saved) ~= "table" then
-        local ok, legacy = pcall(function()
-            return PersistentDB:GetStructuredData(StorageKeys.RUNESQL_KEY)
-        end)
-        saved = ok and legacy or nil
-    end
-    if type(saved) ~= "table" then return copyData(nil) end
+    local saved, loadError = loadTextData()
+    if saved == nil then return copyData(nil), loadError end
 
     local data = copyData(saved)
     local seen = {}
@@ -112,67 +109,26 @@ end
 
 -- Load saved queries into a store with isolated editing copies
 function QueryStore.new()
-    return setmetatable({ data = loadData() }, QueryStore)
+    local data, loadError = loadData()
+    return setmetatable({ data = data, loadError = loadError }, QueryStore)
 end
 
--- Write query data through chunked storage or the older structured-data host API
+-- Write query data through chunked storage, refusing while the save cannot be read
 function QueryStore:Persist(data)
-    if PersistentDB == nil then
+    if self.loadError ~= nil then return false, self.loadError end
+    if PersistentDB == nil or PersistentDB.SetString == nil or PersistentDB.GetString == nil then
         return false, "PersistentDB is unavailable."
     end
-    if PersistentDB.SetString ~= nil and PersistentDB.GetString ~= nil then
-        local encoded = Json.encode(data)
-        local saved, failure = ChunkedStringStore.Write(TEXT_STORE, encoded)
-        if not saved and failure.stage == "chunk" then
-            return false, "PersistentDB could not save RuneQL chunk "
-                .. tostring(failure.index) .. "."
-        end
-        if not saved then
-            return false, "PersistentDB could not publish the RuneQL save."
-        end
-        return true, nil
+    local encoded = Json.encode(data)
+    local saved, failure = ChunkedStringStore.Write(TEXT_STORE, encoded)
+    if not saved and failure.stage == "chunk" then
+        return false, "PersistentDB could not save RuneQL chunk "
+            .. tostring(failure.index) .. "."
     end
-    if PersistentDB.SetStructuredData == nil then
-        return false, "PersistentDB is unavailable."
-    end
-    local ok, result = pcall(function()
-        return PersistentDB:SetStructuredData(StorageKeys.RUNESQL_KEY, data)
-    end)
-    if not ok then
-        return false, "PersistentDB rejected the RuneQL query."
-    end
-    if result == false then
-        local readOK, stored = pcall(function()
-            return PersistentDB:GetStructuredData(StorageKeys.RUNESQL_KEY)
-        end)
-        if not readOK or type(stored) ~= "table"
-            or Json.encode(stored) ~= Json.encode(data) then
-            return false, "PersistentDB rejected the RuneQL query."
-        end
+    if not saved then
+        return false, "PersistentDB could not publish the RuneQL save."
     end
     return true, nil
-end
-
--- Create the sidebar selection ID for a valid saved query
-function QueryStore.SelectionID(queryID)
-    local numericID = math.tointeger(tonumber(queryID))
-    if numericID == nil or numericID <= 0 then return nil end
-    return SELECTION_PREFIX .. tostring(numericID)
-end
-
--- Extract a saved query ID from a recognized sidebar selection
-function QueryStore.QueryIDFromSelection(selection)
-    if type(selection) ~= "string"
-        or string.sub(selection, 1, #SELECTION_PREFIX) ~= SELECTION_PREFIX then
-        return nil
-    end
-    local numericID = math.tointeger(tonumber(string.sub(selection, #SELECTION_PREFIX + 1)))
-    return numericID ~= nil and numericID > 0 and tostring(numericID) or nil
-end
-
--- Recognize selection IDs belonging to saved queries
-function QueryStore:IsSelection(selection)
-    return QueryStore.QueryIDFromSelection(selection) ~= nil
 end
 
 -- Return copies of saved queries for sidebar and editor use
@@ -193,11 +149,6 @@ function QueryStore:Get(queryID)
     return nil
 end
 
--- Resolve a sidebar selection to a copied saved query record
-function QueryStore:GetBySelection(selection)
-    local queryID = QueryStore.QueryIDFromSelection(selection)
-    return queryID ~= nil and self:Get(queryID) or nil
-end
 
 -- Find a conflicting query name while optionally excluding the record being edited
 function QueryStore:FindName(name, exceptID)
@@ -270,6 +221,6 @@ end
 
 QueryStore.MAX_NAME_LENGTH = MAX_NAME_LENGTH
 QueryStore.MAX_QUERY_LENGTH = MAX_QUERY_LENGTH
-QueryStore.SELECTION_PREFIX = SELECTION_PREFIX
+QueryStore.TEXT_STORE = TEXT_STORE
 
 return QueryStore

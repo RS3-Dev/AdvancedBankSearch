@@ -1,13 +1,9 @@
--- Enrich query records with bank fields and optional price data
+-- Enrich query records with bank fields and optional price data. The caller passes the GE
+-- price service it found, or nil
 
 local ObjectConfig = require("advancedbanksearch/core/object_config")
 
 local QueryItemFields = {}
-
--- Return the optional GE price dependency used by price-based queries
-function QueryItemFields.Service()
-    return geprices
-end
 
 -- Check the query's required fields before requesting price data
 function QueryItemFields.NeedsPrices(plan)

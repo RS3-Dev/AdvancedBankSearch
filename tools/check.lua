@@ -73,6 +73,8 @@ else
     local _, coreHead = run('git -C "' .. coreRoot .. '" log -1 --format="%h %s"')
     print("Bank Core for tests: " .. coreRoot .. " at " .. (coreHead:match("[^\r\n]+") or "unknown"))
 end
+-- RuneQL is read from its installed folder, which is not a git checkout
+print("RuneQL for tests: " .. (os.getenv("RUNEQL_ROOT") or "RUNEQL_ROOT is not set, so tests that rank fail"))
 
 local tests = trackedFiles('"tests/*_test.lua"')
 for _, path in ipairs(tests) do
