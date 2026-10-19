@@ -1,11 +1,13 @@
--- Compose Advanced Bank Search: saved queries, the Search tab, the search and query pages,
--- the wait for GE prices, and the connection to Bank Core's public API. Through that API it
--- registers its mounted tab, two pages, and a listener, and reads the bank only through Bank
--- Core's item snapshots. RuneQL, GE Prices, and Bank Tags are optional dependencies, each
+-- Compose Advanced Bank Search: saved queries and their folders, the Search tab and its row
+-- menus, the search and query pages, the wait for GE prices, and the connection to Bank
+-- Core's public API. Through that API it registers its mounted tab, two pages, and a
+-- listener, and reads the bank only through Bank Core's item snapshots. RuneQL, GE Prices, and Bank Tags are optional dependencies, each
 -- read only while the host last reported it loaded
 
+local FolderDialog = require("advancedbanksearch/search/folder_dialog")
 local ItemFields = require("advancedbanksearch/search/item_fields")
 local QueryEditor = require("advancedbanksearch/search/query_editor")
+local QueryMenus = require("advancedbanksearch/search/query_menus")
 local QueryStore = require("advancedbanksearch/search/query_store")
 local Ranking = require("advancedbanksearch/search/ranking")
 local SearchTab = require("advancedbanksearch/search/search_tab")
@@ -89,12 +91,14 @@ function App.new()
         status = nil,
         statusIsError = false,
         editor = nil,
+        folderDialog = nil,
         panel = nil,
         retired = false,
         started = false,
         shutDown = false,
     }, App)
     app.tab = SearchTab.new(app)
+    app.menus = QueryMenus.new(app)
     -- The import source Bank Tags lists while it is loaded
     app.tagSource = TagSource.new(app)
     if app.queries.loadError ~= nil then app:ShowStatus(app.queries.loadError, true) end
@@ -164,15 +168,19 @@ function App:Connect()
         self:Disconnect()
         return false, failure
     end
+    self.menus:Start()
     self.tagSource:Update()
     self:UpdatePanelNotice()
     return true
 end
 
--- Drop the owner handle, the price wait, the editor, and the bank snapshot; saved queries stay
+-- Drop the owner handle, the row menus, the price wait, the editor and folder dialog, and the
+-- bank snapshot; saved queries stay
 function App:Disconnect()
+    self.menus:Stop()
     self:StopPriceWait()
     self:CloseEditor()
+    self:CloseFolderDialog()
     local handle = self.handle
     self.handle, self.bank = nil, nil
     self.snapshot, self.shownPage, self.shownKey, self.outcome, self.published = nil, nil, nil, nil, {}
@@ -203,11 +211,13 @@ function App:DependencyChanged(name, enabled)
     self:Refresh()
 end
 
--- A closed bank drops the snapshot and the editor; the snapshot is read again on reopening
+-- A closed bank drops the snapshot, the editor, and the folder dialog; the snapshot is read
+-- again on reopening
 function App:OnState(state)
     if not state.running or CLOSED[state.reason] then
         self.snapshot = nil
         self:CloseEditor()
+        self:CloseFolderDialog()
     end
 end
 
@@ -434,10 +444,10 @@ function App:NewQuery()
     self:OpenEditor(nil)
 end
 
--- Open the editor for the chosen query
-function App:EditQuery()
+-- Open the editor for a query, the chosen one by default
+function App:EditQuery(queryID)
     self.confirmDelete = nil
-    local record = self.queries:Get(self.selectedQuery)
+    local record = self.queries:Get(queryID or self.selectedQuery)
     if record ~= nil then self:OpenEditor(record) end
 end
 
@@ -478,6 +488,7 @@ end
 -- Open the query editor, replacing one already open. Saving needs RuneQL
 function App:OpenEditor(record)
     self:CloseEditor()
+    self:CloseFolderDialog()
     local parent = windowParent()
     if parent == nil then return false end
     local editor
@@ -499,6 +510,94 @@ function App:CloseEditor()
     local editor = self.editor
     self.editor = nil
     if editor ~= nil then pcall(function() editor:Destroy() end) end
+end
+
+-- Open a folder dialog, replacing the editor or a dialog already open
+function App:OpenFolderDialog(options)
+    self:CloseEditor()
+    self:CloseFolderDialog()
+    local parent = windowParent()
+    if parent == nil then return false end
+    local dialog
+    options.onClose = function()
+        if self.folderDialog == dialog then self.folderDialog = nil end
+    end
+    dialog = FolderDialog.new(parent, options)
+    self.folderDialog = dialog
+    dialog:Show()
+    return true
+end
+
+-- Close the folder dialog
+function App:CloseFolderDialog()
+    local dialog = self.folderDialog
+    self.folderDialog = nil
+    if dialog ~= nil then pcall(function() dialog:Destroy() end) end
+end
+
+-- Choose a query's folder: another folder, no folder, or a new folder holding it
+function App:OpenFolderChooser(queryID)
+    local record = self.queries:Get(queryID)
+    if record == nil then return false end
+    local current = self.queries:FolderOf(queryID)
+    local choices = {}
+    if current ~= nil then choices[1] = { id = "", label = "No folder" } end
+    for _, folder in ipairs(self.queries:Folders()) do
+        if folder.id ~= current then choices[#choices + 1] = { id = folder.id, label = folder.name } end
+    end
+    return self:OpenFolderDialog({ title = "Move to Folder", heading = record.name, choices = choices,
+        placeholder = "New folder name", saveLabel = "Create",
+        onChoose = function(folderID) return self:MoveQueryToFolder(queryID, folderID ~= "" and folderID or nil) end,
+        onSave = function(name) return self:CreateFolder(name, queryID) end })
+end
+
+-- Rename a folder through the folder dialog
+function App:OpenRenameFolder(folderID)
+    local folder = self.queries:GetFolder(folderID)
+    if folder == nil then return false end
+    return self:OpenFolderDialog({ title = "Rename Folder", heading = folder.name, text = folder.name,
+        onSave = function(name) return self:RenameFolder(folderID, name) end })
+end
+
+-- Redraw after a folder or order change; a change refused from the tab says why there, and
+-- one from a dialog says why in the dialog. Returns the change's success and reason
+function App:FolderChanged(fromTab, ok, reason)
+    if not ok and reason ~= nil and fromTab then self:ShowStatus(reason, true) end
+    self:Refresh()
+    return ok, reason
+end
+
+-- Collapse or expand a folder; the chosen query and the shown page stay as they are
+function App:ToggleFolder(folderID)
+    local folder = self.queries:GetFolder(folderID)
+    if folder == nil then return false end
+    return self:FolderChanged(true, self.queries:SetFolderCollapsed(folderID, not folder.collapsed))
+end
+
+-- Move a query into a folder, or out of its folder with nil
+function App:MoveQueryToFolder(queryID, folderID)
+    return self:FolderChanged(false, self.queries:MoveToFolder(queryID, folderID))
+end
+
+-- Create a folder holding a query
+function App:CreateFolder(name, queryID)
+    local ok, _, reason = self.queries:CreateFolder(name, queryID)
+    return self:FolderChanged(false, ok, reason)
+end
+
+-- Rename a folder
+function App:RenameFolder(folderID, name)
+    return self:FolderChanged(false, self.queries:RenameFolder(folderID, name))
+end
+
+-- Remove a folder, keeping its queries
+function App:UngroupFolder(folderID)
+    return self:FolderChanged(true, self.queries:DeleteFolder(folderID))
+end
+
+-- Move a folder or query one step among its siblings
+function App:MoveEntry(kind, entryID, offset)
+    return self:FolderChanged(true, self.queries:Move(kind, entryID, offset))
 end
 
 -- Save a query from the editor once RuneQL can read it, then show the change; a failed save
@@ -563,7 +662,7 @@ function App:DestroyPanel()
     if panel ~= nil then pcall(function() panel:Destroy() end) end
 end
 
--- Stop the plugin: release its panel, editor, price wait, and Bank Core registration
+-- Stop the plugin: release its panel, menus, windows, price wait, and Bank Core registration
 function App:Shutdown()
     if self.shutDown then return end
     self.shutDown = true

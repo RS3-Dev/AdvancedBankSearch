@@ -66,9 +66,23 @@ function Harness.new(name, options)
     local objects = {}
     config.Obj.FromID = function(objectID) return objects[objectID] end
     local contentSubscriptions = {}
-    for _, event in ipairs({ "GameStateChanged", "MiniMenuEntrySelected", "MiniMenuReady",
+    for _, event in ipairs({ "GameStateChanged", "MiniMenuEntrySelected",
         "InventoryAdded", "InventoryRemoved", "InventoryUpdated" }) do
         Event[event] = { Subscribe = function() end, Unsubscribe = function() end }
+    end
+    -- Each plugin's MiniMenuReady handler, by subscription ID
+    local menuSubscriptions = {}
+    Event.MiniMenuReady = {
+        Subscribe = function(key, action) menuSubscriptions[key] = action end,
+        Unsubscribe = function(key) menuSubscriptions[key] = nil end,
+    }
+    -- PrettyUI's sprite buttons also show whether they are selected
+    local newSpriteButton = prettyui.SpriteButton.new
+    prettyui.SpriteButton.new = function(...)
+        local button = newSpriteButton(...)
+        button.selected, button.disabled = button.options.selected == true, button.options.disabled == true
+        function button:SetSelected(selected) self.selected = selected == true end
+        return button
     end
     Event.ContentLayerReady = {
         Subscribe = function(key, action) contentSubscriptions[key] = action end,
@@ -92,6 +106,7 @@ function Harness.new(name, options)
         objects = objects,
         databases = databases,
         contentSubscriptions = contentSubscriptions,
+        menuSubscriptions = menuSubscriptions,
         coreRoot = coreRoot,
         out = out,
         coreFolder = coreRoot .. "/plugins/bankcore",
@@ -170,6 +185,55 @@ function Harness:OpenContentPanel(event)
     panel:SetSize(300, 400)
     self.contentSubscriptions[event or "advancedbanksearch_content"]({ component = panel })
     return panel
+end
+
+-- Build a menu over mounted content, lowest priority first with Cancel at the bottom, and let
+-- every subscribed plugin answer it, in subscription ID order or, with coreFirst, Bank Core
+-- first; the host documents no order. A plugin's entry is appended, as the API documents,
+-- and shows its label as overrideText
+function Harness:ContentMenu(coreFirst)
+    local menu = { entries = { { verbText = "Cancel", actionType = MiniMenuActionType.CANCEL },
+        { verbText = "Walk here", actionType = 23 } } }
+    setmetatable(menu, { __index = function(values, key)
+        if key == "entryCount" then return #values.entries end
+    end })
+    function menu:Add(label, action)
+        self.entries[#self.entries + 1] = { verbText = label, overrideText = label, action = action }
+    end
+    function menu:Swap(a, b) self.entries[a], self.entries[b] = self.entries[b], self.entries[a] end
+    local keys = {}
+    for key in pairs(self.menuSubscriptions) do keys[#keys + 1] = key end
+    table.sort(keys, function(a, b)
+        if coreFirst then return a > b end
+        return a < b
+    end)
+    for _, key in ipairs(keys) do self.menuSubscriptions[key]({ miniMenu = menu }) end
+    return menu
+end
+
+-- List a menu's entry labels from lowest to highest priority, markup removed
+function Harness.Labels(menu)
+    local labels = {}
+    for index, entry in ipairs(menu.entries) do labels[index] = (string.gsub(entry.verbText, "<[^>]->", "")) end
+    return table.concat(labels, " | ")
+end
+
+-- Choose a menu entry whose label starts with the given text
+function Harness.Choose(menu, label)
+    for _, entry in ipairs(menu.entries) do
+        if string.sub(entry.verbText, 1, #label) == label and entry.action ~= nil then return entry.action() end
+    end
+    error(label .. " is not in the menu: " .. Harness.Labels(menu))
+end
+
+-- Point the mouse at a position inside a component
+function Harness:PointAt(component, x, y)
+    local left, top, current = 0, 0, component
+    while current ~= nil do
+        left, top = left + (current.x or 0), top + (current.y or 0)
+        current = current.parent
+    end
+    self.bankHost.mouse = { x = left + x, y = top + y }
 end
 
 -- Find a component under a parent whose text or content matches, searching depth first
