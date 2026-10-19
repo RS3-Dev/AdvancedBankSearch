@@ -6,9 +6,11 @@ Everything here is checked against Bank Core's stand-in host and the installed R
 
 ## Features
 
-- **Search tab.** A sidebar tab with a RuneQL search field, a status line, your saved searches with how many stacks each matched last, and New, Edit, and Delete.
+- **Search tab.** A sidebar tab with a RuneQL search field and a sort button, your saved searches and folders with how many stacks each search matched last, and New, Edit, and Delete. A status line appears under the field only while there is something to say; otherwise the saved searches start right under it.
 - **Search page.** Typing two or more characters ranks the bank's stacks against the text, best match first and ties in bank order, and shows them in the bank, placeholders included. Each new search starts at the top; a bank change ranks the same search again and keeps your place. Clearing the text returns to the bank.
 - **Saved searches.** Choosing one shows its page, placeholders left out; choosing it again returns to the bank. New and Edit open an editor for the name (up to 40 characters) and the query (up to 9,999). Delete asks you to press it again.
+- **Folders.** As in Bank Tags, folders hold saved searches. A folder row shows how many it holds; click it to open or close it, which changes neither the chosen search nor the page shown. A closed folder is outlined when the chosen search is inside. Right-click a search for Edit, Move to folder (pick a folder, No folder, or type a new folder's name and press Create), and Remove from folder; right-click a folder for Expand or Collapse, Rename folder, and Ungroup folder, which removes the folder and keeps its searches where it was. A folder can be empty. New searches go at the bottom, outside any folder; editing a search keeps its folder and place, and deleting it takes it out of its folder.
+- **Sorting.** The swap button beside the field turns sorting on and off. While sorting, every folder is open and each row has up and down arrows: folders and searches outside folders move among themselves, and searches inside a folder move within it. Rows do nothing when clicked while sorting. Folders, their order, and whether each is open are saved.
 - **Prices.** A search that uses `price`, `gehigh`, or `gelow` needs GE Prices. Until prices load, its page says it is waiting, and it is ranked once they arrive (checked every 30 ticks, for up to 1,800); it is never ranked on missing prices. Without GE Prices its page says it is needed. Other searches never need GE Prices.
 - **Convert to a tag.** With Bank Tags loaded, its Import window lists "Saved bank search": type a saved search's name and Bank Tags previews a tag holding exactly the stacks the search matches now.
 - **Plugin panel.** Says whether the plugin is in the bank, and whether Bank Core or RuneQL is needed.
@@ -29,12 +31,13 @@ All four are declared as optional dependencies because the host reports changes 
 
 - Saved searches are kept under `advancedbanksearch:queries:v1:*` in this plugin's own saved data.
 - **A new install starts with no saved searches.** Each plugin's saved data is separate, so this plugin cannot read the old Bank Utilities plugin's `bankutils:runesql:*` searches, and it never changes or deletes them. To keep an old search, copy its query text from the old plugin, if you can still open it, into New here.
+- Folders and the order are saved in the same keys. A save from before folders loads with every search outside any folder, in its saved order, with the same IDs; a folder change or a new order cannot be read by those earlier builds, which would save over it without folders.
 - A query RuneQL cannot read is refused in the editor with RuneQL's reason, and a save that cannot be written is reported there; either way nothing changes and the editor stays open. Saving a query drops its old count; a shown query is counted again at once. A save that cannot be read is reported in the tab and never overwritten; nothing is saved until it is fixed.
 
 ## Changes from the old integrated plugin
 
 - The search field is in the Search tab, not in place of the bank's own search box, which is no longer hidden or moved. The `enableAdvancedSearch` and `enableRuneSQL` preferences are gone: enabling the plugin is the switch. There is no settings section.
-- Delete and Convert to tag left the right-click menu: Delete is a button in the tab, and conversion starts from Bank Tags' Import window.
+- Delete and Convert to tag left the right-click menu: Delete is a button in the tab, and conversion starts from Bank Tags' Import window. The right-click menu now holds folder actions.
 - A price search waiting for GE prices shows that it is waiting instead of ranking without prices, which could match the wrong items.
 - Converting matches exactly the stacks found. A search that matches a later stack of an item without its first (for example by quantity) cannot be converted, because Bank Tags numbers an item's stacks in the order listed; the source says so instead of tagging another stack. A search of more than 1,999 stacks is refused rather than cut short.
 - Saved searches start empty in the new plugin's own saved data (see above).
@@ -63,4 +66,6 @@ To install, copy `dist/release/advancedbanksearch/` into the client's plugins fo
 - Keyboard focus and typing in the search field inside Bank Core's mounted column, and PrettyUI's list and buttons there.
 - That GE Prices is reported to dependents as `geprices`: its folder is `geprices`, but its manifest names it "Ge Price Library" and its README says `gepl`. If the host uses another identifier, price searches will say GE Prices is needed.
 - Whether saved data is scoped per plugin, when the host calls `PluginDependencyUpdate` on reloads, whether it re-injects globals, and how it clones exports.
-- How the editor window draws over the bank.
+- How the editor window and folder dialog draw over the bank.
+- The folder chevron's rotation, the sort arrows' positions and clicks inside list rows, and where the host places right-click entries over the tab.
+- Whether one status line of Museo Sans 11pt fits about one character per 6 pixels, which decides when the status takes two lines.
