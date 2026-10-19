@@ -128,10 +128,16 @@ function SearchTab:Refresh()
     controls.list:SetEntries(entries)
     controls.empty.hidden = #entries > 0
     local searchable = app:RuneQL() ~= nil
-    controls.field:SetDisabled(not searchable)
     local selected = app.selectedQuery ~= nil and app.queries:Get(app.selectedQuery) ~= nil
-    controls.edit:SetDisabled(not selected)
-    controls.delete:SetDisabled(not selected)
+    -- Set each control's state only when it changes, not on every keystroke
+    local states = { field = not searchable, edit = not selected, delete = not selected }
+    controls.disabled = controls.disabled or {}
+    for name, disabled in pairs(states) do
+        if controls.disabled[name] ~= disabled then
+            controls[name]:SetDisabled(disabled)
+            controls.disabled[name] = disabled
+        end
+    end
 end
 
 -- Report whether the column is mounted now

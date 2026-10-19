@@ -29,7 +29,7 @@ All four are declared as optional dependencies because the host reports changes 
 
 - Saved searches are kept under `advancedbanksearch:queries:v1:*` in this plugin's own saved data.
 - **A new install starts with no saved searches.** Each plugin's saved data is separate, so this plugin cannot read the old Bank Utilities plugin's `bankutils:runesql:*` searches, and it never changes or deletes them. To keep an old search, copy its query text from the old plugin, if you can still open it, into New here.
-- A save that cannot be written is reported in the editor and nothing changes. A save that cannot be read is reported in the tab and never overwritten; nothing is saved until it is fixed.
+- A query RuneQL cannot read is refused in the editor with RuneQL's reason, and a save that cannot be written is reported there; either way nothing changes and the editor stays open. Saving a query drops its old count; a shown query is counted again at once. A save that cannot be read is reported in the tab and never overwritten; nothing is saved until it is fixed.
 
 ## Changes from the old integrated plugin
 

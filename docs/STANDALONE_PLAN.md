@@ -30,7 +30,7 @@ This records the plan agreed before implementation for making Advanced Bank Sear
 ## Saved queries
 
 - New keys `advancedbanksearch:queries:v1:manifest` and its `a|b` chunks, written through the preserved chunked store. The old `bankutils:runesql:*` data belongs to the old plugin's own saved data, which this plugin cannot read; nothing migrates and nothing reads the old structured fallback.
-- Names up to 40 characters and queries up to 9,999, as before. A failed save is reported in the editor and nothing changes in memory.
+- Names up to 40 characters and queries up to 9,999, as before. A query RuneQL cannot compile is refused before anything is written, as the integrated editor did. A failed save is reported in the editor and nothing changes in memory.
 
 ## Converting a query to a tag
 

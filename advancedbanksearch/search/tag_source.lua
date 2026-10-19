@@ -120,8 +120,8 @@ end
 -- Answer one request with a draft of the saved query's current matches, or say why not
 function TagSource:Answer(request)
     local app = self.app
-    local name = Ranking.Normalize(request.input)
-    local record = app.queries:FindName(name)
+    -- Names match as the store compares them, so a name with inner double spaces is found
+    local record = app.queries:FindName(request.input)
     if record == nil then
         request:Fail("No saved search has that name.")
         return

@@ -33,7 +33,8 @@ assert(app:SaveQuery(nil, "Iron", "iron"))
 assert(app:SaveQuery(nil, "Big stacks, iron", "iron AND qty:[6 TO *]"))
 assert(app:SaveQuery(nil, "Lobster", "lobster"))
 assert(app:SaveQuery(nil, "Priced", "iron AND price:[1 TO *]"))
-assert(app:SaveQuery(nil, "Broken", "name:(iron"))
+-- The editor refuses a query RuneQL cannot read, so one saved by an older RuneQL is stored directly
+assert(app.queries:Save(nil, "Broken", "name:(iron"))
 
 -- Ask the source for a draft and return its answer
 local function request(input)
@@ -65,6 +66,11 @@ assert(big.state == "error" and big.value == "Iron bar: a later stack matched wi
 assert(app:SaveQuery(nil, "Ores, all", "iron AND ore"))
 local ores = request("ores, all")
 assert(ores.state == "ready" and ores.value[1].name == "ores all", tostring(ores.value))
+-- A name is found as the store compares names: trimmed and in any case, inner spaces kept
+assert(app:SaveQuery(nil, "Iron  bars", 'name:"iron bar"'))
+local bars = request(" iron  BARS ")
+assert(bars.state == "ready" and bars.value[1].name == "iron bars" and #bars.value[1].keys == 3, tostring(bars.value))
+assert(app.queries:FindName("Iron  bars").name == "Iron  bars")
 
 -- Unknown names, unreadable queries, price queries, and nothing found are refused
 assert(request("missing").value == "No saved search has that name.")

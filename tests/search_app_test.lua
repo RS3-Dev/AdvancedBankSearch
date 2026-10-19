@@ -3,7 +3,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 -- Drive the built Advanced Bank Search through the real Bank Core and the installed RuneQL:
 -- the search field opening and leaving its page, a new key per search and the same key when
 -- the bank changes, placeholders on search pages but not query pages, unreadable text,
--- saved queries made, edited, refused, and deleted, price queries waiting for GE prices,
+-- saved queries made, edited, refused, and deleted, their counts, price queries waiting for GE prices,
 -- stale waits dropped, and RuneQL or GE Prices unloading
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
@@ -128,6 +128,18 @@ assert(shown() == "[No items match]" and controls.status.content == "No items ma
 -- Clearing the text returns to the bank's own view
 type("")
 assert(key() == nil and app.shownPage == nil)
+-- Typing sets the controls' disabled state only when it changes
+local disabledSets = 0
+for _, name in ipairs({ "field", "edit", "delete" }) do
+    local setDisabled = controls[name].SetDisabled
+    controls[name].SetDisabled = function(...)
+        disabledSets = disabledSets + 1
+        return setDisabled(...)
+    end
+end
+type("i")
+type("")
+assert(disabledSets == 0)
 host:SetItems({ { 101, 5 }, { 102, 5 }, { 103, 0 }, { 104, 5 }, { 105, 9 }, { 101, 3 } })
 layout:HandleInventoryUpdate()
 h:Tick(4)
@@ -136,9 +148,20 @@ h:Tick(4)
 
 assert(rows() == "" and not controls.empty.hidden)
 assert(controls.edit.disabled and controls.delete.disabled)
+-- The editor opens shown
+local newWindow, shownWindows = prettyui.Window.new, 0
+prettyui.Window.new = function(...)
+    local window = newWindow(...)
+    local show = window.Show
+    function window:Show()
+        shownWindows = shownWindows + 1
+        return show(self)
+    end
+    return window
+end
 press(controls.new)
 local editor = app.editor
-assert(editor ~= nil and editor.queryID == nil)
+assert(editor ~= nil and editor.queryID == nil and shownWindows == 1)
 editor.nameField:SetText("Iron")
 editor.queryField:SetText("iron")
 press(editor.saveButton)
@@ -182,6 +205,40 @@ assert(app.editor == nil and rows() == "Bars (2) | Lobster")
 
 -- Saving another query selects it but leaves the shown page as it was
 assert(key() == "query:1" and app.selectedQuery == "2")
+
+-- Query text RuneQL cannot read is refused with RuneQL's reason: nothing is written, the editor
+-- stays open, and the rows, counts, selection, and shown page stay as they were
+local function stored()
+    local entries = {}
+    for name, value in pairs(h.databases.advancedbanksearch) do entries[#entries + 1] = name .. "=" .. tostring(value) end
+    table.sort(entries)
+    return table.concat(entries, "\n")
+end
+local before = stored()
+local unreadable, unreadableReason = app:RuneQL().Compile("iron AND (")
+assert(unreadable == nil and unreadableReason ~= nil)
+press(controls.new)
+app.editor.nameField:SetText("Broken")
+app.editor.queryField:SetText("iron AND (")
+press(app.editor.saveButton)
+assert(app.editor ~= nil and app.editor.status.content == tostring(unreadableReason), app.editor.status.content)
+assert(stored() == before and rows() == "Bars (2) | Lobster" and app.selectedQuery == "2" and key() == "query:1")
+app:CloseEditor()
+-- Editing a query that is not shown: a refused edit keeps its count, and a saved one drops it
+assert(controls.list:Click("1"))
+h:Tick(2)
+assert(key() == nil and app.selectedQuery == "1" and rows() == "Bars (2) | Lobster")
+press(controls.edit)
+app.editor.queryField:SetText("iron AND (")
+press(app.editor.saveButton)
+assert(app.editor ~= nil and stored() == before and rows() == "Bars (2) | Lobster")
+app.editor.queryField:SetText("iron")
+press(app.editor.saveButton)
+assert(app.editor == nil and app.queries:Get("1").query == "iron" and rows() == "Bars | Lobster", rows())
+-- Showing it counts it afresh
+assert(controls.list:Click("1"))
+h:Tick(2)
+assert(key() == "query:1" and rows() == "Bars (4) | Lobster", rows())
 
 -- Deleting asks once, then deletes and leaves the query's page
 assert(controls.list:Click("1"))

@@ -490,6 +490,7 @@ function App:OpenEditor(record)
         end,
     })
     self.editor = editor
+    editor:Show()
     return true
 end
 
@@ -500,11 +501,16 @@ function App:CloseEditor()
     if editor ~= nil then pcall(function() editor:Destroy() end) end
 end
 
--- Save a query from the editor, then show the change; a failed save changes nothing
+-- Save a query from the editor once RuneQL can read it, then show the change; a failed save
+-- changes nothing. A saved query's old count is dropped, and counted again when its page shows
 function App:SaveQuery(queryID, name, query)
-    if self:RuneQL() == nil then return false, NEEDS_RUNEQL end
+    local engine = self:RuneQL()
+    if engine == nil then return false, NEEDS_RUNEQL end
+    local plan, queryReason = engine.Compile(query)
+    if plan == nil then return false, tostring(queryReason or "RuneQL could not read this query.") end
     local saved, record, reason = self.queries:Save(queryID, name, query)
     if not saved then return false, reason end
+    self.counts[record.id] = nil
     self.selectedQuery = record.id
     self:ShowStatus('Saved "' .. record.name .. '".')
     if self.shownPage == QUERY_PAGE and self.pageQuery == record.id and self.handle ~= nil then
