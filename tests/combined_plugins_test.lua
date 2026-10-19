@@ -70,7 +70,8 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     h:ChooseTab("bankcleaner", "cleanup")
     h:Tick(4)
     assert(searchApp.shownPage == nil and cleanerApp.tabActive and not cleanerApp:IsBusy())
-    assert(layout.list:Click("__bankutils_ext:bankcleaner/metal_bank"))
+    -- Bank Cleaner mounts its own row list in the Cleanup tab; a category row shows its page
+    assert(cleanerApp.sidebar ~= nil and cleanerApp.sidebar.list:Click("metal_bank"))
     h:Tick(2)
     assert(layout.pageState.view.key == "cleanup:metal_bank" and cleanerApp.shownPage == "metal_bank")
     checkSeparate(h, cleaner, search)
