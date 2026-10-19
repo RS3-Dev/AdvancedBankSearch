@@ -64,3 +64,23 @@ Each stage passes `lua54 tools/check.lua`, and Bank Core's and Bank Tags' trees 
 ## Not verified live
 
 Keyboard focus in the mounted search field, `geprices` as the optional dependency identifier (its manifest names itself "Ge Price Library"), per-plugin saved data, how the host clones exports and calls `PluginDependencyUpdate` on reloads.
+
+## Results
+
+All stages are implemented on `feature/standalone-plugin`, each in its own commit, with `tools/check.lua` passing at every stage against Bank Core `2e4941e` read from `BANKCORE_ROOT` and the installed RuneQL 0.4.0 read from `RUNEQL_ROOT`. Bank Core, Bank Tags, and RuneQL were only read; Bank Core's and Bank Tags' trees were checked unchanged after every stage. Nothing has been verified in the live client.
+
+| | Lua files | Lines |
+| --- | ---: | ---: |
+| Built `dist/release/advancedbanksearch` (entry and 10 modules, plus `plugin.json`) | 11 | 1,795 |
+| Tests and tools | 13 | 1,752 |
+
+Tests: `ranking_test` (the real RuneQL: order, ties, copies, placeholders, unreadable text, and RuneQL's missing-field semantics pinned), `query_store_test` (new keys only, validation, a refused write, an unreadable save never overwritten), `search_app_test` (the real Bank Core and RuneQL: the field opening and leaving the search page, keys, re-ranking on bank changes, unchanged pages not sent, saved queries made, edited, refused, and deleted, price waits, a stale wait dropped, the give-up, GE Prices and RuneQL unloading, the bank closing), `tag_source_test` (the import source against a Bank Tags stand-in that follows its `CONTRACT.md`), `plugin_reload_test` (load orders, cloned exports, reloads mid-wait, a replaced owner staying idle, no subscription left), and `combined_plugins_test` (Bank Cleaner's own build loaded beside this plugin in shared and separate states).
+
+Found during implementation and left for review:
+
+- RuneQL matches a range only on a row that has the field, and a negated range on every row without it, so ranking a price query before prices load would show wrong items. Price queries are never ranked without loaded prices.
+- After a price wait gave up, Bank Core's next items notice (it reports one after every page rebuild, including this plugin's own) started a new wait; the key whose wait failed now stays failed until the search or GE Prices changes.
+- Saving a new query while another query's page was shown replaced the shown page; the query a page shows is now tracked apart from the list's selection.
+- PrettyUI's `SimpleButton` has no label setter, so Delete's confirmation is in the status line ("Press Delete again...") rather than on the button.
+- The build's default `dist` output refused to build once the check had written `dist/check`; it is now `dist/release`.
+- Every original file in `EXTRACTION_MANIFEST.json` has a byte-identical copy in the repository; the adapted `object_config`, `query_store`, `query_editor`, and `query_item_fields` are in `reference/preserved/`.
