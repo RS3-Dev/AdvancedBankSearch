@@ -75,6 +75,13 @@ else
 end
 -- RuneQL is read from its installed folder, which is not a git checkout
 print("RuneQL for tests: " .. (os.getenv("RUNEQL_ROOT") or "RUNEQL_ROOT is not set, so tests that rank fail"))
+local prettyRoot = os.getenv("PRETTYUI_ROOT")
+if prettyRoot == nil then
+    print("PrettyUI for tests: PRETTYUI_ROOT is not set, so tests that load Bank Core fail")
+else
+    local _, prettyHead = run('git -C "' .. prettyRoot .. '" log -1 --format="%h %s"')
+    print("PrettyUI for tests: " .. prettyRoot .. " at " .. (prettyHead:match("[^\r\n]+") or "unknown"))
+end
 
 local tests = trackedFiles('"tests/*_test.lua"')
 for _, path in ipairs(tests) do

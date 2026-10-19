@@ -48,6 +48,36 @@ function Harness.CoreRoot()
     return root
 end
 
+-- Find the PrettyUI checkout PRETTYUI_ROOT names, read-only, whose real widgets tests run
+function Harness.PrettyUIRoot()
+    local root = os.getenv("PRETTYUI_ROOT")
+    if root == nil then error("set PRETTYUI_ROOT to a PrettyUI checkout the tests load widgets from", 0) end
+    root = string.gsub(root, "\\", "/")
+    if not exists(root .. "/src/sprite_button.lua") then
+        error("PrettyUI's src/sprite_button.lua was not found under " .. root, 0)
+    end
+    return root
+end
+
+-- Load PrettyUI's real SpriteButton over the stand-in host's components, with its sprite
+-- table, tooltips, and wheel binding from the stand-in widgets and a cursor that sets nothing
+function Harness.LoadSpriteButton(prettyRoot)
+    config.Cursor = { CURSOR_BLANK = 1, CURSOR_INFO = 2 }
+    ui.Interfaces.GetInterface = function() return {} end
+    local stubs = {
+        ["src/core/sprites"] = { SPRITE_BUTTONS = prettyui.Sprites.SPRITE_BUTTONS },
+        ["src/tooltip"] = prettyui.Tooltip,
+        ["src/core/cursor"] = { apply = function() end },
+        ["src/core/wheel"] = { bind = function(component, options)
+            if options and options._onScrollWheel then
+                component:Subscribe(ui.Hook.ONSCROLLWHEEL, "prettyui_scroll_forward", options._onScrollWheel)
+            end
+        end },
+    }
+    local env = setmetatable({ require = function(name) return assert(stubs[name], name) end }, { __index = _G })
+    return assert(loadfile(prettyRoot .. "/src/sprite_button.lua", "t", env))()
+end
+
 -- Install the stand-in host and widgets, build the plugin into dist/test/<name>, and create
 -- a loader. options.separateGlobals gives each plugin its own _G; options.cloneExports
 -- injects an ordinary data clone of each export, as a host that clones exports would
@@ -76,14 +106,8 @@ function Harness.new(name, options)
         Subscribe = function(key, action) menuSubscriptions[key] = action end,
         Unsubscribe = function(key) menuSubscriptions[key] = nil end,
     }
-    -- PrettyUI's sprite buttons also show whether they are selected
-    local newSpriteButton = prettyui.SpriteButton.new
-    prettyui.SpriteButton.new = function(...)
-        local button = newSpriteButton(...)
-        button.selected, button.disabled = button.options.selected == true, button.options.disabled == true
-        function button:SetSelected(selected) self.selected = selected == true end
-        return button
-    end
+    -- Sprite buttons are PrettyUI's own, so the tab can call only what PrettyUI defines
+    prettyui.SpriteButton = Harness.LoadSpriteButton(Harness.PrettyUIRoot())
     Event.ContentLayerReady = {
         Subscribe = function(key, action) contentSubscriptions[key] = action end,
         Unsubscribe = function(key) contentSubscriptions[key] = nil end,
@@ -92,10 +116,12 @@ function Harness.new(name, options)
     local out = "dist/test/" .. name
     local built = Build.Run({ out = out })
     local Loader = require("tools/test_support/fake_plugin_host")
+    local logged = {}
     local globals = { ui = ui, id = id, Event = Event, config = config, Vector4 = Vector4,
         Mouse = Mouse, MiniMenuActionType = MiniMenuActionType,
         Player = { IsAvailable = function() return true end }, GameState = { GAME = 30 },
-        log = function() end }
+        -- The host log keeps each line, so a test can see Bank Core report a failed mount
+        log = function(...) logged[#logged + 1] = table.concat({ ... }) end }
     local databases = {}
     local host = Loader.new(globals, { exports = { prettyui = prettyui }, databases = databases,
         separateGlobals = options.separateGlobals, cloneExports = options.cloneExports,
@@ -105,6 +131,7 @@ function Harness.new(name, options)
         host = host,
         objects = objects,
         databases = databases,
+        logged = logged,
         contentSubscriptions = contentSubscriptions,
         menuSubscriptions = menuSubscriptions,
         coreRoot = coreRoot,
@@ -113,6 +140,14 @@ function Harness.new(name, options)
         searchFolder = built.folder,
         built = built,
     }, { __index = Harness })
+end
+
+-- Return the first line Bank Core logged for a failed plugin callback, or nil
+function Harness:LoggedFailure()
+    for _, line in ipairs(self.logged) do
+        if string.find(line, " failed: ", 1, true) then return line end
+    end
+    return nil
 end
 
 -- Load Bank Core from its source checkout, as a plugin with its own module cache

@@ -22,7 +22,7 @@ h:Tick(2)
 local tab = app.tab
 local controls = tab.controls
 local parent = h:TabParent()
-assert(controls ~= nil and parent ~= nil)
+assert(controls ~= nil and parent ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
 
 -- Type into the search field as the host reports it
 local function type(text)
@@ -60,8 +60,11 @@ end
 -- button sits at the field's right
 local width = controls.width
 assert(controls.status.hidden and controls.list.root.y == 40, tostring(controls.list.root.y))
-assert(controls.field.options.width == width - 32 and controls.sort.options.x == 8 + width - 26)
-assert(controls.sort.spriteName == "SWAP" and controls.sort.options.y == 8)
+assert(controls.field.options.width == width - 32 and controls.sort.root.x == 8 + width - 26)
+-- The sort button is PrettyUI's real toggleable sprite button, off until clicked
+local swap = prettyui.Sprites.SPRITE_BUTTONS.SWAP
+assert(controls.sort.spriteName == "SWAP" and controls.sort.root.y == 8)
+assert(controls.sort.disabled and controls.sort.root.spriteID == swap.disabled)
 assert(Harness.Find(parent, "Saved searches") == nil)
 local idleHeight = controls.list.root.height
 assert(idleHeight == controls.height - 44 - 40 - 4, tostring(idleHeight))
@@ -136,8 +139,8 @@ app:Refresh()
 
 -- Collapse Smithing first: sorting still shows its queries so they can move
 assert(app:ToggleFolder("1"))
-controls.sort.action()
-assert(tab.sortMode and controls.sort.selected)
+controls.sort.root.hooks.click()
+assert(tab.sortMode and not controls.sort.disabled and controls.sort.root.spriteID == swap.neutral)
 assert(rows() == "Smithing (2) | >Bars (1)* | >Ores | Fish | Empty (0)", rows())
 -- Each row has an up and a down arrow at its right, past the label, disabled at its ends
 local function arrows(label)
@@ -148,7 +151,7 @@ local function arrows(label)
     return found.ARROW_UP, found.ARROW_DOWN
 end
 local up, down = arrows("Smithing (2)")
-assert(up.options.x == -50 and down.options.x == -28 and up.options.xAnchor == 1.0 and up.options.y == 5)
+assert(up.root.x == -50 and down.root.x == -28 and up.root.y == 5)
 assert(up.disabled and not down.disabled)
 assert(rowNamed("Fish").label.width == -8 - 50)
 local barsUp, barsDown = arrows("Bars (1)")
@@ -161,14 +164,14 @@ assert(controls.list:Click("folder:1"))
 h:Tick(2)
 assert(app.queries:GetFolder("1").collapsed)
 -- Arrows move one step: queries within their folder, folders and loose queries at the top
-barsDown.action()
+select(2, arrows("Bars (1)")).root.hooks.click()
 assert(rows() == "Smithing (2) | >Ores | >Bars (1)* | Fish | Empty (0)", rows())
-select(2, arrows("Smithing (2)")).action()
+select(2, arrows("Smithing (2)")).root.hooks.click()
 assert(rows() == "Fish | Smithing (2) | >Ores | >Bars (1)* | Empty (0)", rows())
 assert(key() == "query:1")
 -- Finishing shows Smithing closed again; the order is saved
-controls.sort.action()
-assert(not tab.sortMode and not controls.sort.selected and #tab.arrows == 0)
+controls.sort.root.hooks.click()
+assert(not tab.sortMode and controls.sort.disabled and #tab.arrows == 0)
 assert(rows() == "Fish | Smithing (2)* | Empty (0)", rows())
 
 -- Row menus -----------------------------------------------------------------------------

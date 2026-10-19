@@ -99,8 +99,11 @@ function SearchTab:Build()
         onChange = function(_, _, content) app:SetText(content) end,
     })
     owned[#owned + 1] = controls.field
-    controls.sort = prettyui.SpriteButton.new(parent, "SWAP", function() self:SetSortMode(not self.sortMode) end, {
+    -- A toggleable sprite button shows its disabled sprite while off and flips that state
+    -- itself when clicked, reporting whether it is now on
+    controls.sort = prettyui.SpriteButton.new(parent, "SWAP", function(_, on) self:SetSortMode(on) end, {
         x = X + width - SORT_SIZE, y = FIELD_TOP, size = SORT_SIZE, tooltip = "Sort saved searches and folders",
+        toggleable = true, disabled = not self.sortMode,
     })
     owned[#owned + 1] = controls.sort
     controls.status = addText(parent, "", BODY_TOP, width, STATUS_LINE_HEIGHT, MUTED, 2)
@@ -306,7 +309,7 @@ function SearchTab:Refresh()
     controls.list:SetEntries(entries)
     self:DecorateRows()
     controls.empty.hidden = #entries > 0
-    controls.sort:SetSelected(self.sortMode)
+    controls.sort:SetDisabled(not self.sortMode)
     controls.sort:SetTooltip(self.sortMode and "Finish sorting" or "Sort saved searches and folders")
     local searchable = app:RuneQL() ~= nil
     local selected = app.selectedQuery ~= nil and app.queries:Get(app.selectedQuery) ~= nil

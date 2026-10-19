@@ -25,7 +25,7 @@ local session, layout = h:OpenBank()
 local service = session.extensionPages
 h:Tick(2)
 local controls = app.tab.controls
-assert(controls ~= nil and h:TabParent() ~= nil, "the Search tab did not mount")
+assert(controls ~= nil and h:TabParent() ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
 
 -- Count the pages sent to Bank Core
 local updates = 0
