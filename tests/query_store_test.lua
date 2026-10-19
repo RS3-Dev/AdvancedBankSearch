@@ -61,6 +61,110 @@ assert(store:Delete(iron.id) and store:Get(iron.id) == nil)
 assert(select(2, store:Delete(iron.id)) == "That RuneQL query no longer exists.")
 assert(select(3, store:Save("99", "Gone", "gone")) == "That RuneQL query no longer exists.")
 
+-- Folders ---------------------------------------------------------------------------------
+
+-- Describe the sidebar tree as text: a query by name, a folder as Name[members], + if collapsed
+local function tree(target)
+    local parts = {}
+    for _, node in ipairs(target:Tree()) do
+        if node.kind == "query" then
+            parts[#parts + 1] = node.query.name
+        else
+            local members = {}
+            for index, record in ipairs(node.queries) do members[index] = record.name end
+            parts[#parts + 1] = node.name .. (node.collapsed and "+" or "") .. "[" .. table.concat(members, ",") .. "]"
+        end
+    end
+    return table.concat(parts, " ")
+end
+
+-- Publish a save as an older build wrote it: flat queries with no folders or order
+local function publish(text)
+    values["advancedbanksearch:queries:v1:manifest"] = "a:1"
+    values["advancedbanksearch:queries:v1:a:1"] = text
+end
+publish('{"schemaVersion":1,"nextId":4,"queries":[{"id":"3","name":"Gems","query":"gem"},'
+    .. '{"id":"1","name":"Bars","query":"bar"},{"id":"2","name":"Ores","query":"ore"}]}')
+local folders = QueryStore.new()
+assert(folders.loadError == nil and tree(folders) == "Gems Bars Ores", tree(folders))
+assert(#folders:Folders() == 0 and folders:FolderOf("1") == nil)
+
+-- A folder made for a query takes its place; others join at the end; an empty folder stays
+assert(select(3, folders:CreateFolder("  ", "1")) == "Enter a folder name.")
+assert(select(3, folders:CreateFolder(string.rep("x", 41))) == "Folder names can contain at most 40 characters.")
+local made, smithing = folders:CreateFolder(" Smithing ", "1")
+assert(made and smithing == "1" and tree(folders) == "Gems Smithing[Bars] Ores", tree(folders))
+assert(select(3, folders:CreateFolder("SMITHING")) == "A folder with that name already exists.")
+assert(folders:MoveToFolder("2", smithing) and tree(folders) == "Gems Smithing[Bars,Ores]", tree(folders))
+local _, empty = folders:CreateFolder("Empty")
+assert(tree(folders) == "Gems Smithing[Bars,Ores] Empty[]" and folders:GetFolder(empty).count == 0)
+-- Moving out of a folder puts the query just after it
+assert(folders:MoveToFolder("1", nil) and tree(folders) == "Gems Smithing[Ores] Bars Empty[]", tree(folders))
+assert(folders:MoveToFolder("1", smithing) and folders:MoveToFolder("1", smithing))
+assert(tree(folders) == "Gems Smithing[Ores,Bars] Empty[]", tree(folders))
+assert(select(2, folders:MoveToFolder("1", "99")) == "That folder no longer exists.")
+assert(select(2, folders:MoveToFolder("99", smithing)) == "That RuneQL query no longer exists.")
+
+-- Reordering moves one step among siblings: the top level, or within a folder
+assert(folders:Move("folder", smithing, -1) and tree(folders) == "Smithing[Ores,Bars] Gems Empty[]", tree(folders))
+assert(folders:Move("query", "1", -1) and tree(folders) == "Smithing[Bars,Ores] Gems Empty[]", tree(folders))
+local edge, edgeReason = folders:Move("query", "1", -1)
+assert(not edge and edgeReason == nil and tree(folders) == "Smithing[Bars,Ores] Gems Empty[]")
+assert(folders:Move("query", "3", 1) and tree(folders) == "Smithing[Bars,Ores] Empty[] Gems", tree(folders))
+assert(select(2, folders:Move("folder", "99", 1)) == "That entry no longer exists.")
+
+-- Renaming keeps the folder's ID and members; collapsing is saved
+assert(folders:RenameFolder(smithing, "Metal") and folders:GetFolder(smithing).name == "Metal")
+assert(folders:RenameFolder(smithing, "metal") and select(2, folders:RenameFolder(smithing, "Empty"))
+    == "A folder with that name already exists.")
+assert(folders:SetFolderCollapsed(smithing, true) and tree(folders) == "metal+[Bars,Ores] Empty[] Gems", tree(folders))
+
+-- Editing a query keeps its folder and place; a new query joins the top level's end
+assert(folders:Save("2", "Ores", "ore OR coal") and folders:FolderOf("2") == smithing)
+local _, logs = folders:Save(nil, "Logs", "logs")
+assert(tree(folders) == "metal+[Bars,Ores] Empty[] Gems Logs", tree(folders))
+
+-- A reload reads the same tree, IDs, and collapse state back
+local again = QueryStore.new()
+assert(tree(again) == "metal+[Bars,Ores] Empty[] Gems Logs" and again:FolderOf("1") == smithing, tree(again))
+assert(again:Get("2").query == "ore OR coal" and again:FindName("logs").id == logs.id)
+
+-- Deleting a query leaves its folder; ungrouping keeps the members where the folder was
+assert(folders:Delete("2") and tree(folders) == "metal+[Bars] Empty[] Gems Logs", tree(folders))
+assert(folders:DeleteFolder(smithing) and tree(folders) == "Bars Empty[] Gems Logs", tree(folders))
+assert(folders:DeleteFolder(empty) and tree(folders) == "Bars Gems Logs" and folders:GetFolder(empty) == nil)
+assert(select(2, folders:DeleteFolder(empty)) == "That folder no longer exists.")
+-- Folder IDs are never reused
+local _, newer = folders:CreateFolder("New", "3")
+assert(newer == "3" and tree(folders) == "Bars New[Gems] Logs", tree(folders))
+
+-- A refused write changes nothing: not the tree, the collapse state, or the published save
+refuse = true
+local published = values["advancedbanksearch:queries:v1:manifest"]
+local before = tree(folders)
+assert(not folders:CreateFolder("Other", "1") and not folders:MoveToFolder("1", newer))
+assert(not folders:Move("query", "1", 1) and not folders:RenameFolder(newer, "Renamed"))
+assert(not folders:DeleteFolder(newer) and not folders:SetFolderCollapsed(newer, true))
+assert(tree(folders) == before and values["advancedbanksearch:queries:v1:manifest"] == published, tree(folders))
+refuse = false
+
+-- Folder data that does not fit is dropped and its queries kept: a query in two folders
+-- stays in the first, missing IDs and bad folders go, and missed queries join the end
+publish('{"schemaVersion":1,"nextId":4,"nextFolderId":2,"queries":[{"id":"1","name":"Bars","query":"bar"},'
+    .. '{"id":"2","name":"Ores","query":"ore"},{"id":"3","name":"Gems","query":"gem"}],'
+    .. '"folders":[{"id":"5","name":"A","queries":["2","9","2"]},{"id":"6","name":"B","queries":["2","1"]},'
+    .. '{"id":"x","name":"Bad","queries":["3"]},{"id":"7","name":" ","queries":[]},"junk",'
+    .. '{"id":"5","name":"Again","queries":[]}],'
+    .. '"order":[{"kind":"folder","id":"6"},{"kind":"query","id":"2"},{"kind":"folder","id":"9"},7,'
+    .. '{"kind":"folder","id":"6"}]}')
+local messy = QueryStore.new()
+assert(messy.loadError == nil and tree(messy) == "B[Bars] Gems A[Ores]", tree(messy))
+local _, folderID = messy:CreateFolder("C")
+assert(folderID == "7", folderID)
+-- Folders and order that are not lists load as none
+publish('{"schemaVersion":1,"nextId":2,"queries":[{"id":"1","name":"Bars","query":"bar"}],"folders":"x","order":{}}')
+assert(tree(QueryStore.new()) == "Bars")
+
 -- A published save whose chunk is missing cannot be read: it loads empty with an error and
 -- every save is refused, so it is never overwritten
 local broken = values["advancedbanksearch:queries:v1:manifest"]
