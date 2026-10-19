@@ -1,7 +1,5 @@
--- Load the real RuneQL API, read-only, from the installed plugin RUNEQL_ROOT names, with its
--- own module cache, so tests rank with RuneQL's documented Compile, Score, and Requirements
--- rather than a stand-in. Nothing from RuneQL is copied into this repository or its package
--- Kept outside tests/ so tools/check.lua does not count it as a test program
+-- Load the installed RuneQL API from RUNEQL_ROOT, read-only
+-- Kept outside tests/ so tools/check.lua does not run it
 
 local RuneQL = {}
 
@@ -16,7 +14,7 @@ function RuneQL.Root()
     return root
 end
 
--- Return RuneQL's API table, loaded from its folder in an environment of its own
+-- Load RuneQL's API in an environment of its own
 function RuneQL.Load()
     local root = RuneQL.Root()
     local loaded = {}

@@ -1,12 +1,6 @@
--- Add folder and saved-search actions to the right-click menu over the Search tab's rows,
--- from this plugin's own MiniMenuReady subscription. A menu over a bank item is left alone.
--- The host lists entries from lowest to highest priority and a left click runs the last; the
--- API documents Add as appending there, but live clients have placed plugin entries just
--- above Cancel or just below the native default, so each entry is found by comparing the
--- list before and after, then moved low. Bank Core promotes Cancel over mounted content
--- before or after this runs; nothing here relies on which. A chosen entry runs on the next
--- logic tick, and only while the same column is mounted and its row still exists, both when
--- chosen and when it runs. Adapted from Bank Tags' menus
+-- Add folder and saved-search entries to the Search tab's row menus
+-- Clients place new entries unpredictably, so each is found then moved low
+-- A chosen entry runs next tick, only if its column and row still exist
 
 local QueryMenus = {}
 QueryMenus.__index = QueryMenus
@@ -44,12 +38,12 @@ local function signature(entry)
         tostring(entry.fullText), tostring(entry.verbText), tostring(entry.subjectText) }, "\n")
 end
 
--- Remove markup and outer spaces, then lowercase, so menu text compares reliably
+-- Strip markup and spaces and lowercase for comparison
 local function normalize(value)
     return string.lower((tostring(value or ""):gsub("<[^>]->", "")):match("^%s*(.-)%s*$"))
 end
 
--- Place Cancel at the highest priority, so a left click does nothing
+-- Make Cancel the default so a left click does nothing
 local function promoteCancel(menu)
     for index, entry in ipairs(menu.entries) do
         if entry.actionType == MiniMenuActionType.CANCEL then
@@ -59,7 +53,7 @@ local function promoteCancel(menu)
     end
 end
 
--- Add one entry and return where the host put it, or nil when it cannot be found
+-- Add one entry and return its index, or nil if not found
 local function add(menu, label, subject, action)
     local text = label .. " <col=" .. NAME_COLOUR .. ">" .. subject .. "</col>"
     local before = {}
@@ -88,9 +82,8 @@ local function move(menu, from, to)
     for current = from, to - step, step do menu:Swap(current, current + step) end
 end
 
--- Add entries at the lowest priority, in order, just above a Cancel at the bottom, so the
--- default stays as it was. An entry that cannot be found, or a default that moved, makes
--- Cancel the default, so a left click runs nothing unplaced
+-- Add entries just above a bottom Cancel, keeping the default
+-- If any entry is lost or the default moves, Cancel becomes default
 local function addLow(menu, entries)
     local top = menu.entries[menu.entryCount]
     local topSignature = top ~= nil and signature(top) or nil
@@ -109,8 +102,7 @@ local function addLow(menu, entries)
     if now == nil or signature(now) ~= topSignature then promoteCancel(menu) end
 end
 
--- Wrap an action to run on the next logic tick, unless current() stops holding before it is
--- chosen or before it runs
+-- Run an action next tick if current() still holds
 function QueryMenus:Defer(current, action)
     return function()
         if not current() then return end
@@ -161,8 +153,7 @@ local function plain(name)
     return (string.gsub(tostring(name), "[<>]", ""))
 end
 
--- Answer one menu: a folder's Expand or Collapse, Rename folder, and Ungroup folder, or a
--- saved search's Edit, Move to folder, and Remove from folder
+-- Offer the folder or saved-search actions for the clicked row
 function QueryMenus:HandleMenu(menu)
     local app = self.app
     local handle = app.handle

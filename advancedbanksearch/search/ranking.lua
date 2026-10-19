@@ -1,16 +1,14 @@
--- Rank a bank snapshot's stacks against RuneQL text the way the integrated search did: score
--- descending, ties in View All order. A query that names price fields is never ranked
--- without loaded prices, since RuneQL treats a missing field as matching nothing and a
--- negated price clause would then match every item
+-- Rank bank stacks against RuneQL text by score, then View All order
+-- Price queries wait for prices, since negated missing fields match everything
 
 local ItemFields = require("advancedbanksearch/search/item_fields")
 
 local Ranking = {}
 
--- Search text shorter than this, after trimming, shows no page
+-- Shorter trimmed search text shows no page
 Ranking.MINIMUM_LENGTH = 2
 
--- Normalize spaces and casing before checking search text
+-- Normalize spaces and case in search text
 function Ranking.Normalize(value)
     return (string.lower(tostring(value or "")):match("^%s*(.-)%s*$"):gsub("%s+", " "))
 end
@@ -20,7 +18,7 @@ function Ranking.IsSearchable(value)
     return #Ranking.Normalize(value) >= Ranking.MINIMUM_LENGTH
 end
 
--- Return a function that reads an object's display name, caching every answer
+-- Read objects' display names with a cache
 function Ranking.NameReader()
     local names = {}
     return function(objectID)
@@ -39,7 +37,7 @@ function Ranking.NameReader()
     end
 end
 
--- Rank items by score(item), dropping those it does not match and, when asked, placeholders
+-- Rank matching items by score, optionally without placeholders
 function Ranking.Rank(items, score, excludePlaceholders)
     local matches = {}
     for index, item in ipairs(items) do
@@ -57,10 +55,8 @@ function Ranking.Rank(items, score, excludePlaceholders)
     return matches
 end
 
--- Run RuneQL text over a snapshot's items. request: runeql (the API), text, items,
--- excludePlaceholders, prices (the GE price service or nil), and nameOf. The outcome's
--- state is "ok" with its matches, "invalid" with RuneQL's reason, "needs_prices" when the
--- text names price fields and no price service is loaded, or "prices_loading" until it is ready
+-- Run RuneQL text over a snapshot's items
+-- States: ok, invalid, needs_prices, or prices_loading
 function Ranking.Search(request)
     local plan, reason = request.runeql.Compile(request.text)
     if plan == nil then return { state = "invalid", reason = tostring(reason or "") } end

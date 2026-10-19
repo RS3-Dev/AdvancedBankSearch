@@ -1,10 +1,6 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
--- Load the built Advanced Bank Search beside the real Bank Core and the installed RuneQL in
--- isolated plugin environments and follow every load order: without Core, Core arriving late,
--- reloading, cloned, and unloading, the plugin reloading with and without a shared Lua state
--- while a price wait runs, a newer copy taking the owner ID, and saved queries kept in this
--- plugin's own saved data
+-- Follow Bank Core and RuneQL through every load order
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
 local Harness = require("tools/test_support/search_harness")
@@ -18,7 +14,7 @@ local Loader = require("tools/test_support/fake_plugin_host")
 h:NameObjects({ { 101, "Iron bar" }, { 105, "Lobster" } })
 h.bankHost:SetItems({ { 101, 5 }, { 105, 9 } })
 
--- Without Bank Core or RuneQL the plugin loads, publishes nothing, and says Core is needed
+-- Without Core or RuneQL, nothing is published and the panel says so
 local search = h:LoadSearch()
 local app = h:App()
 assert(app ~= nil and not app:IsConnected() and search.result == nil and app:RuneQL() == nil)
@@ -27,10 +23,10 @@ assert(Harness.Find(panel, NOT_CONNECTED) ~= nil)
 for moduleName in pairs(search.env.package.loaded) do
     assert(string.sub(moduleName, 1, 19) == "advancedbanksearch/", moduleName .. " is not this plugin's module")
 end
--- Saving a query needs RuneQL; queries save to this plugin's own data
+-- Saving needs RuneQL and writes to this plugin's own data
 assert(select(2, app:SaveQuery(nil, "Iron", "iron")) == "Searching needs RuneQL. Enable RuneQL to search your bank.")
 
--- RuneQL and Core arrive late; the plugin connects and its panel says where it is
+-- Late RuneQL and Core connect, and the panel says where to look
 h:LoadRuneQL()
 assert(app:RuneQL() ~= nil)
 assert(app:SaveQuery(nil, "Iron", "iron"))
@@ -45,7 +41,7 @@ h:OpenBank()
 h:Tick(2)
 assert(app.tab.controls ~= nil and app:ChooseQuery("1"))
 
--- Core reloads; the plugin reconnects to the new API and its tab mounts again
+-- A Core reload reconnects and the tab mounts again
 local oldAPI = core.result
 h.host:Reload("bankcore", { shutdown = true, notify = true, reinject = true })
 assert(not oldAPI.GetState().running and app:IsConnected() and app.bank == core.result)
@@ -54,13 +50,13 @@ h:OpenBank()
 h:Tick(2)
 assert(app.tab.controls ~= nil)
 
--- A host that clones exports hands the plugin a copy of Core's API; a reload still connects
+-- A cloned Core API still connects after a reload
 h.host:Reload("bankcore", { shutdown = true })
 h.host.exports.bankcore = Loader.Clone(core.result)
 h.host:Notify("bankcore", true, true)
 assert(app:IsConnected() and app.bank == h.host.exports.bankcore and getmetatable(app.bank) == nil)
 
--- Core unloads while a price wait runs: the plugin lets go and the wait ends
+-- Core unloading mid-wait releases the plugin and ends the wait
 h.host:Unload("bankcore")
 assert(not app:IsConnected() and Harness.Find(panel, NOT_CONNECTED) ~= nil)
 h:LoadCore()
@@ -76,8 +72,8 @@ h:LoadCore()
 h:OpenBank()
 h:Tick(2)
 
--- The plugin reloads in the same Lua state mid-wait: the old session stops its wait and the
--- new one reads the same saved queries; the old copy, told Core loaded, takes nothing back
+-- A same-state reload mid-wait stops the old wait and keeps queries
+-- The old copy takes nothing back when told Core loaded
 app:SetText("price:[2 TO *]")
 assert(app.priceWait ~= nil)
 h.host:Reload("advancedbanksearch", { freshEnvironment = true })
@@ -109,8 +105,8 @@ end
 assert(h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch/search") == nil)
 h.host:Unload("bankcore")
 
--- Separate Lua states with cloned exports: a newer copy takes the owner ID and the older one,
--- told Core loaded, stays idle
+-- Separate states: a newer copy takes the owner ID
+-- The older copy stays idle when told Core loaded
 local split = Harness.new("plugin_reload_split", { separateGlobals = true, cloneExports = true })
 split:LoadCore()
 local first = split:LoadSearch()

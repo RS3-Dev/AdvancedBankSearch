@@ -1,4 +1,4 @@
--- Edit saved query names and expressions without owning bank rendering
+-- Edit saved query names and expressions
 
 local QueryStore = require("advancedbanksearch/search/query_store")
 
@@ -12,14 +12,14 @@ local CONTENT_WIDTH = WIDTH - 16 - MARGIN * 2
 local BUTTON_GAP = 8
 local QUERY_FIELD_HEIGHT = 286
 
--- Create the saved-query editor and connect its name, query, and save controls
+-- Create the saved-query editor and its controls
 function QueryEditor.new(parent, options)
     options = options or {}
     local record = options.record or {}
     local self = setmetatable({
         queryID = record.id,
         onSave = options.onSave,
-        -- Why saving is not possible now, kept on show while the player types
+        -- Why saving is blocked, kept while the player types
         blocked = options.blocked,
     }, QueryEditor)
 
@@ -162,7 +162,7 @@ function QueryEditor:SetStatus(value)
     self.status.hidden = value == nil or value == ""
 end
 
--- Submit the name and expression to the save callback and close only after success
+-- Send the name and query to save, closing on success
 function QueryEditor:Save()
     if self.onSave == nil or self.blocked ~= nil then return end
     local saved, reason = self.onSave(
@@ -182,7 +182,7 @@ function QueryEditor:Show()
     self.window:Show()
 end
 
--- Destroy editor controls and release their window references
+-- Destroy the editor's controls and window
 function QueryEditor:Destroy()
     for _, control in ipairs({
         self.saveButton,

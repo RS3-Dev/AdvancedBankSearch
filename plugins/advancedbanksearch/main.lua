@@ -1,7 +1,5 @@
--- Start Advanced Bank Search: RuneQL search and saved queries in the bank sidebar, shown
--- through Bank Core's public API. Bank Core, RuneQL, GE Prices, and Bank Tags are optional
--- dependencies only because the host reports changes for optional dependencies; without
--- Bank Core, the plugin panel says it is needed
+-- Start Advanced Bank Search on top of Bank Core
+-- Dependencies are optional only so the host reports load changes
 
 local SESSION_KEY = "__advancedbanksearch_session"
 
@@ -12,8 +10,8 @@ if rawget(_G, SESSION_KEY) == previous then _G[SESSION_KEY] = nil end
 previous = nil
 pcall(function() collectgarbage("collect") end)
 
--- The host retains modules across reloads; evict this plugin's cache to keep callbacks current.
--- tools/build.lua writes the list into the built main.lua, so run the built folder, not this file
+-- The host keeps modules across reloads, so evict this plugin's cache
+-- tools/build.lua fills in this list, so run the built folder
 if package ~= nil and package.loaded ~= nil then
     for _, moduleName in ipairs({
         -- build: every module this plugin loads
@@ -27,8 +25,7 @@ local app = App.new()
 _G[SESSION_KEY] = app
 app:Start()
 
--- Connect when Bank Core loads and let go when it unloads; RuneQL, GE Prices, and Bank Tags
--- are read only while the host last reported them loaded
+-- Connect or release Bank Core and track optional dependencies
 function PluginDependencyUpdate(event)
     local name = event.pluginIdentifier
     if name ~= "bankcore" then
@@ -38,7 +35,7 @@ function PluginDependencyUpdate(event)
     if event.enabled then app:Connect() else app:Disconnect() end
 end
 
--- Stop the session and release its reload reference when the host unloads the plugin
+-- Stop the session and drop its reload reference on unload
 function PluginShutdown()
     app:Shutdown()
     if rawget(_G, SESSION_KEY) == app then _G[SESSION_KEY] = nil end

@@ -1,11 +1,10 @@
--- Enrich query records with bank fields and optional price data. The caller passes the GE
--- price service it found, or nil
+-- Add bank fields and optional prices to query records
 
 local ObjectConfig = require("advancedbanksearch/core/object_config")
 
 local QueryItemFields = {}
 
--- Check the query's required fields before requesting price data
+-- Check whether the query needs price fields
 function QueryItemFields.NeedsPrices(plan)
     local fields = plan:Requirements()
     return fields.price == true or fields.gehigh == true or fields.gelow == true
@@ -21,18 +20,17 @@ function QueryItemFields.IsReady(service)
     return ok and ready == true
 end
 
--- Accept only positive numeric prices so missing values do not become valid query fields
+-- Accept only positive prices so missing values never match
 local function positive(value)
     value = tonumber(value)
     return value ~= nil and value > 0 and value or nil
 end
 
--- Build query records with bank fields and prices cached for one execution
+-- Build query records, caching prices for one execution
 function QueryItemFields.Enricher(plan, service)
     local needsPrices = QueryItemFields.NeedsPrices(plan)
     local ready = needsPrices and QueryItemFields.IsReady(service)
-    -- Cache within one execution, including missing prices and repeated stacks
-    -- A later execution reads fresh values from the dependency
+    -- Cache missing prices and repeated stacks for this run only
     local prices = {}
     local configNames = {}
     return function(name, item)
@@ -52,7 +50,7 @@ function QueryItemFields.Enricher(plan, service)
                 fields.price = fields.gehigh or fields.gelow
             end
         end
-        -- RuneQL v2 identifies items by config name; item IDs are not query fields
+        -- RuneQL identifies items by config name, not item ID
         local configName = nil
         if item.objectID ~= nil then
             configName = configNames[item.objectID]

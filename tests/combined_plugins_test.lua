@@ -1,10 +1,7 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
--- Load the built Bank Cleaner (read from BANKCLEANER_DIST, which Bank Cleaner's own build
--- wrote) beside the built Advanced Bank Search, Bank Core, and RuneQL, in one shared Lua state
--- and again with separate states and cloned exports, to show the two plugins share no module
--- path, event, hook, reload global, tab, page, or saved data, and that either can unload or
--- reload without touching the other
+-- Load Bank Cleaner from BANKCLEANER_DIST beside this plugin
+-- Check that they share nothing and unload or reload independently
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
 local cleanerFolder = os.getenv("BANKCLEANER_DIST")
@@ -17,7 +14,7 @@ assert(io.open(cleanerFolder .. "/main.lua", "rb"), "no built Bank Cleaner at " 
 
 local Harness = require("tools/test_support/search_harness")
 
--- Check every loaded module, subscription, and saved key belongs to its plugin's namespace
+-- Check every module, subscription, and key is in its plugin's namespace
 local function checkSeparate(h, cleaner, search)
     for moduleName in pairs(cleaner.env.package.loaded) do
         assert(string.find(moduleName, "^bankcleaner/"), "Bank Cleaner loaded " .. moduleName)
@@ -50,7 +47,7 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     assert(cleanerApp ~= nil and searchApp ~= nil and cleanerApp ~= searchApp)
     assert(cleanerApp:IsConnected() and searchApp:IsConnected())
 
-    -- Both tabs are in the rail, ordered by owner ID, and each owner has only its own pages
+    -- Both tabs show in owner order, each with only its own pages
     local _, layout = h:OpenBank()
     h:Tick(2)
     local ids = {}
@@ -59,7 +56,7 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
         table.concat(ids, " "))
     assert(#cleanerApp.handle:GetState().pages == 13 and #searchApp.handle:GetState().pages == 2)
 
-    -- Each works: a search page from the Search tab, then a category page from Cleanup
+    -- Each plugin's pages work from its own tab
     h:ChooseTab("advancedbanksearch", "search")
     h:Tick(2)
     assert(searchApp.tab.controls ~= nil and not cleanerApp.tabActive)
@@ -70,13 +67,13 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     h:ChooseTab("bankcleaner", "cleanup")
     h:Tick(4)
     assert(searchApp.shownPage == nil and cleanerApp.tabActive and not cleanerApp:IsBusy())
-    -- Bank Cleaner mounts its own row list in the Cleanup tab; a category row shows its page
+    -- Bank Cleaner's row list opens a category page
     assert(cleanerApp.sidebar ~= nil and cleanerApp.sidebar.list:Click("metal_bank"))
     h:Tick(2)
     assert(layout.pageState.view.key == "cleanup:metal_bank" and cleanerApp.shownPage == "metal_bank")
     checkSeparate(h, cleaner, search)
 
-    -- Advanced Bank Search reloads and unloads; Bank Cleaner keeps its tab and page
+    -- Reloading this plugin leaves Bank Cleaner's tab and page
     h.host:Reload("advancedbanksearch", { freshEnvironment = true })
     h:Tick(2)
     assert(h:App():IsConnected() and cleanerApp:IsConnected())
@@ -86,7 +83,7 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     assert(cleanerApp:IsConnected() and layout.pageState.view.key == "cleanup:metal_bank")
     assert(#h.host:SubscriptionsOf("advancedbanksearch") == 0)
 
-    -- Bank Cleaner unloads; nothing of either is left in Bank Core
+    -- Once Bank Cleaner unloads, nothing of either remains in Core
     h.host:Unload("bankcleaner")
     h:Tick(2)
     assert(#layout.extensionTabs == 0 and #h.host:SubscriptionsOf("bankcleaner") == 0)

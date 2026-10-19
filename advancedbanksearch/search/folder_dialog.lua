@@ -1,7 +1,5 @@
--- Choose a saved search's folder or name a folder. Move to Folder lists the other folders,
--- and No folder when the search is in one, above a field that creates a new folder holding
--- it; Rename Folder has only the field. Bank Core's menus have no submenus, so the folders
--- are listed here
+-- Choose a saved search's folder or name a new folder
+-- Bank Core's menus have no submenus, so folders are listed here
 
 local QueryStore = require("advancedbanksearch/search/query_store")
 
@@ -15,14 +13,13 @@ local ROW_HEIGHT = 30
 local LIST_HEIGHT = ROW_HEIGHT * 5 + 2
 local BUTTON_GAP = 8
 
--- Create the dialog. options: title, heading, choices ({ id, label } list, or nil for none),
--- text, placeholder, saveLabel, onChoose(choiceID) and onSave(name), each returning success
--- and a reason, and onClose()
+-- Create the dialog from title, choices, field, and callbacks
+-- onChoose and onSave return success and a reason
 function FolderDialog.new(parent, options)
     local self = setmetatable({ onChoose = options.onChoose, onSave = options.onSave, owned = {} }, FolderDialog)
     local listed = options.choices ~= nil
     local fieldTop = listed and 40 + LIST_HEIGHT + 10 or 36
-    -- The field, the status line, the buttons, and room for the window's title and frame
+    -- Room for the field, status, buttons, and window frame
     local height = fieldTop + 136
     self.window = prettyui.Window.new(parent, {
         title = options.title, x = -math.floor(WIDTH / 2), y = -math.floor(height / 2),

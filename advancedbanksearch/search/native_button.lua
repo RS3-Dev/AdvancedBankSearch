@@ -1,13 +1,12 @@
--- Draw a native bank button with a sprite icon, as Bank Tags draws its sort button: the
--- host's gold-bordered button panel, with the icon lit while hovered or active
+-- Draw a native bank button with an icon lit on hover or use
 
 local NativeButton = {}
 NativeButton.__index = NativeButton
 
--- The host's button panel style, for a host that does not name it
+-- The host's button panel style, if the host does not name it
 local BUTTON_PANEL = 318
 
--- Create a square button at x, y with a centred icon. options: x, y, size, iconSize, tooltip
+-- Create a square button with a centred icon
 function NativeButton.new(parent, spriteName, action, options)
     local self = setmetatable({
         action = action,
@@ -25,7 +24,7 @@ function NativeButton.new(parent, spriteName, action, options)
     self.root.stylesheetID = id.StyleSheet.BUTTON_PANEL or BUTTON_PANEL
     if self.root.text ~= nil then self.root.text.content = "" end
     self.root:Subscribe(ui.Hook.ONBUTTONPRESSED, function() self.action(self, self.active) end)
-    -- A host button holds no children, so the icon sits beside it and lets clicks through
+    -- A host button holds no children, so the icon sits beside it
     local iconSize = options.iconSize
     self.icon = ui.Sprite.new(parent)
     self.icon:SetPos(self.x + math.floor((self.width - iconSize) / 2), self.y + math.floor((self.height - iconSize) / 2))
@@ -58,7 +57,7 @@ function NativeButton:SetActive(active)
     self:Update()
 end
 
--- Change the tooltip through PrettyUI's binding
+-- Change the tooltip through PrettyUI
 function NativeButton:SetTooltip(value)
     return prettyui.Tooltip.set(self, value)
 end

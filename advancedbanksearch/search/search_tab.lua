@@ -1,9 +1,5 @@
--- Draw the Search tab Bank Core mounts in its sidebar: the search field and the sort button,
--- a status line shown only when there is something to say, the saved queries and their
--- folders with each query's last count, and New, Edit, and Delete. The field keeps its
--- control while the tab refreshes, so typing is never interrupted; a refresh moves the
--- status line and rows rather than rebuilding them. The field, sort button, and sorting
--- follow Bank Tags' tag list
+-- Draw the Search tab: field, sort button, status, and saved queries
+-- Refresh moves rows and status without rebuilding the field
 
 local NativeButton = require("advancedbanksearch/search/native_button")
 
@@ -19,7 +15,7 @@ local SORT_ICON_SIZE = 18
 local BODY_TOP = FIELD_TOP + FIELD_HEIGHT + 6
 local STATUS_LINE_HEIGHT = 16
 local STATUS_GAP = 4
--- Roughly how wide a status character is, to tell when the line wraps to a second line
+-- Rough status character width, to spot a wrapped line
 local STATUS_CHARACTER_WIDTH = 6
 local FOOTER_HEIGHT = 44
 local BUTTON_HEIGHT = 28
@@ -39,8 +35,7 @@ local HEADING = 0xE7C878FF
 local FOLDER_ROW = 0x302A21FF
 local SELECTED_BORDER = 0xD2A84DFF
 
--- Create the tab's mount callbacks for an app; the same functions stay registered, so Bank
--- Core keeps the column mounted across tab updates
+-- Create the tab's mount callbacks, kept so Core keeps the column
 function SearchTab.new(app)
     local self = setmetatable({ app = app, ctx = nil, controls = nil, sortMode = false, rowInfo = {},
         arrows = {} }, SearchTab)
@@ -61,8 +56,7 @@ function SearchTab:DestroyArrows()
     self.arrows = {}
 end
 
--- Destroy the column's controls and its tooltip overlay; Bank Core destroys the layers they
--- sit in
+-- Destroy the column's controls and tooltip overlay
 function SearchTab:DestroyControls()
     self:DestroyArrows()
     local controls = self.controls
@@ -79,7 +73,7 @@ function SearchTab:Unmount()
     self.sortMode = false
 end
 
--- Add every parent offset to find a component's place in the window
+-- Find a component's position in the window
 local function windowPosition(component)
     local x, y = 0, 0
     while component ~= nil do
@@ -99,7 +93,7 @@ local function addText(parent, content, y, width, height, colour, maxLines)
     return text
 end
 
--- Build the whole column inside Bank Core's parent, replacing anything built before
+-- Build the column inside Bank Core's parent
 function SearchTab:Build()
     self:DestroyControls()
     local ctx = self.ctx
@@ -110,7 +104,7 @@ function SearchTab:Build()
     local width = math.max(1, bounds.width - X * 2)
     local controls = { parent = parent, owned = {}, width = width, height = bounds.height }
     local owned = controls.owned
-    -- Tooltips draw in the window-wide overlay so the column does not clip them
+    -- Tooltips use the window overlay so the column does not clip them
     local overlay = ctx.overlay
     prettyui.Tooltip.registerContext(parent, overlay, function(target)
         local x, y = windowPosition(target)
@@ -162,8 +156,8 @@ function SearchTab:Build()
     self:Refresh()
 end
 
--- Open a query or toggle a folder from its row. While sorting, folders still open and close,
--- and a query row only redraws, so nothing is chosen
+-- Open a query or toggle a folder from its row
+-- While sorting, query rows only redraw
 function SearchTab:Click(entryID)
     local info = self.rowInfo[entryID]
     if info ~= nil and info.kind == "folder" then
@@ -175,15 +169,14 @@ function SearchTab:Click(entryID)
     end
 end
 
--- Turn sorting on or off; the search text stays, since it does not filter the rows
+-- Toggle sorting, keeping the search text
 function SearchTab:SetSortMode(enabled)
     self.sortMode = enabled == true
     self:Refresh()
 end
 
--- Describe the rows: queries and folders in sidebar order, each open folder's queries beneath
--- it. Each row's kind, ID, and place among its siblings are kept by entry ID, since PrettyUI
--- copies only its own fields
+-- List query and folder rows in sidebar order
+-- Row info is kept by entry ID since PrettyUI copies only its fields
 function SearchTab:Entries()
     local app = self.app
     local entries, rowInfo = {}, {}
@@ -212,7 +205,7 @@ function SearchTab:Entries()
             entries[#entries + 1] = {
                 id = entryID,
                 label = node.name .. " (" .. #node.queries .. ")",
-                -- A collapsed folder carries the outline of the selected query it hides
+                -- A collapsed folder takes the outline of its selected query
                 selected = holdsSelected and not expanded,
                 backgroundColour = FOLDER_ROW,
                 textColour = HEADING,
@@ -228,8 +221,7 @@ function SearchTab:Entries()
     return entries, rowInfo
 end
 
--- Outline a selected row in gold: top, bottom, left, and right edges, each as x, y, width,
--- height, x anchor, and width anchor
+-- Gold outline edges: x, y, width, height, and anchors
 local FRAME_EDGES = {
     { 0, 0, 0, 1, 0, 1.0 }, { 0, ROW_HEIGHT - 1, 0, 1, 0, 1.0 },
     { 0, 0, 1, ROW_HEIGHT, 0, 0 }, { -1, 0, 1, ROW_HEIGHT, 1.0, 0 },
@@ -246,9 +238,8 @@ local function addSelectedFrame(root)
     end
 end
 
--- Point a folder's chevron down when it is open and right when it is closed, left of any sort
--- arrows. The bank arrow faces up and the host turns sprites anticlockwise; it may read any
--- of these fields
+-- Point a folder chevron down when open and right when closed
+-- The arrow faces up and the host may read any of these rotation fields
 local function addChevron(root, expanded, rightInset)
     local chevron = ui.Sprite.new(root)
     chevron:SetPos(-CHEVRON_RIGHT - CHEVRON_SIZE - rightInset, math.floor((ROW_HEIGHT - CHEVRON_SIZE) / 2), 1.0, 0)
@@ -264,8 +255,7 @@ local function addChevron(root, expanded, rightInset)
     chevron:MoveToFront()
 end
 
--- Place each row's label clear of its chevron and arrows, indent folder members, outline the
--- selected row, and add the sort arrows
+-- Place labels, indent members, outline selection, and add arrows
 function SearchTab:DecorateRows()
     for _, row in ipairs(self.controls.list.rows or {}) do
         local info = self.rowInfo[row.entry.id]
@@ -285,7 +275,7 @@ function SearchTab:DecorateRows()
     end
 end
 
--- Add up and down arrows at the row's right, each disabled at its end of the row's siblings
+-- Add up and down arrows, disabled at either end
 function SearchTab:AddArrows(row, info)
     local list = self.controls.list
     for _, offset in ipairs({ -1, 1 }) do
@@ -302,8 +292,7 @@ function SearchTab:AddArrows(row, info)
     end
 end
 
--- Place the status line under the field when it has text, and the rows under it or under
--- the field, sized to the rest of the column above the footer
+-- Place the status line and rows to fill the column above the footer
 function SearchTab:Layout(text)
     local controls = self.controls
     local status = controls.status
@@ -321,7 +310,7 @@ function SearchTab:Layout(text)
     controls.empty:SetPos(X, top + 6)
 end
 
--- Show the app's current status, saved queries and folders, and what can be done now
+-- Refresh the status, saved queries, and buttons
 function SearchTab:Refresh()
     local controls = self.controls
     if controls == nil then return end
@@ -341,7 +330,7 @@ function SearchTab:Refresh()
         or "Sort saved searches and folders")
     local searchable = app:RuneQL() ~= nil
     local selected = app.selectedQuery ~= nil and app.queries:Get(app.selectedQuery) ~= nil
-    -- Set each control's state only when it changes, not on every keystroke
+    -- Only update controls whose state changed
     local states = { field = not searchable, edit = not selected, delete = not selected }
     controls.disabled = controls.disabled or {}
     for name, disabled in pairs(states) do
@@ -352,9 +341,7 @@ function SearchTab:Refresh()
     end
 end
 
--- Find what a row under a point in the column is: { kind, id } for a query or folder, or
--- nil. Rows are measured from the list's top and scroll, so a scrolled list finds the row
--- actually under the point
+-- Find the query or folder row at a point, allowing for scroll
 function SearchTab:EntryAt(x, y)
     local controls = self.controls
     if controls == nil or x == nil or y == nil then return nil end

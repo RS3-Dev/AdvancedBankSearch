@@ -1,12 +1,10 @@
--- Persist saved query records, and the folders and order they are listed in, while RuneQL
--- owns parsing and evaluation. Queries are saved as JSON text in this plugin's own keys; the
--- integrated plugin's bankutils:runesql:* data is never read. A save from before folders
--- has only its queries, which load ungrouped in their saved order
+-- Save queries, folders, and their order as JSON
+-- A save without folders loads its queries ungrouped
 
 local ChunkedStringStore = require("advancedbanksearch/core/chunked_string_store")
 local Json = require("advancedbanksearch/core/json")
 
--- Remove surrounding spaces from text supplied by the user
+-- Trim spaces from user text
 local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
 end
@@ -39,7 +37,7 @@ local function listOf(data, field)
     return type(data) == "table" and type(data[field]) == "table" and data[field] or {}
 end
 
--- Copy query records, folders, and the order, and normalize the next available IDs
+-- Copy queries, folders, and order, fixing the next IDs
 local function copyData(data)
     local result = {
         schemaVersion = 1,
@@ -69,7 +67,7 @@ local function copyData(data)
     return result
 end
 
--- Trim query input and reject missing or overlong names and expressions
+-- Trim and validate a query's name and expression
 local function validate(name, query)
     name = trim(name)
     query = trim(query)
@@ -92,9 +90,8 @@ local function validateFolderName(name)
     return name, nil
 end
 
--- Keep the folders and order consistent with the queries: each query is in at most one
--- folder, the first that lists it; an ID that names nothing is dropped; and each query or
--- folder the order misses goes at the end, queries in their saved order first
+-- Keep folders and order consistent with the queries
+-- Each query sits in one folder, unknown IDs drop, and missing ones go last
 local function normalize(data)
     local known, claimed, folderByID, largestID = {}, {}, {}, 0
     for _, record in ipairs(data.queries) do known[record.id] = true end
@@ -148,7 +145,7 @@ local function findFolder(data, folderID)
     return nil
 end
 
--- Find a folder whose name matches, ignoring case, other than the one excluded
+-- Find another folder with the same name, ignoring case
 local function folderNamed(data, name, exceptID)
     local wanted = string.lower(name)
     for _, folder in ipairs(data.folders) do
@@ -157,8 +154,7 @@ local function folderNamed(data, name, exceptID)
     return nil
 end
 
--- Take a query out of the top level or its folder, and return where in the top level it
--- was: its own place, or just after its folder
+-- Take a query out of its place and return its top-level slot
 local function detach(data, queryID)
     for index, entry in ipairs(data.order) do
         if entry.kind == "query" and entry.id == queryID then
@@ -177,14 +173,14 @@ local function detach(data, queryID)
     return #data.order + 1
 end
 
--- Report whether a save was published, whether or not it can be read
+-- Report whether a save was published
 local function hasSave()
     if PersistentDB == nil or PersistentDB.GetString == nil then return false end
     local ok, value = pcall(function() return PersistentDB:GetString(TEXT_STORE.manifestKey) end)
     return ok and type(value) == "string"
 end
 
--- Decode the published chunked save; nil with an error when a save exists but cannot be read
+-- Decode the chunked save, or return nil and an error
 local function loadTextData()
     local encoded = ChunkedStringStore.Read(TEXT_STORE)
     if encoded == nil then return nil, hasSave() and UNREADABLE or nil end
@@ -193,9 +189,8 @@ local function loadTextData()
     return decoded
 end
 
--- Load the saved queries, retaining only valid unique query IDs, then the folders and order
--- that fit them. A save that cannot be read loads as empty with its error, and is never
--- overwritten
+-- Load valid queries, then the folders and order that fit them
+-- An unreadable save loads empty with its error and is never overwritten
 local function loadData()
     local saved, loadError = loadTextData()
     if saved == nil then return normalize(copyData(nil)), loadError end
@@ -223,13 +218,13 @@ local function loadData()
     return normalize(data)
 end
 
--- Load saved queries into a store with isolated editing copies
+-- Load saved queries into a new store
 function QueryStore.new()
     local data, loadError = loadData()
     return setmetatable({ data = data, loadError = loadError }, QueryStore)
 end
 
--- Write query data through chunked storage, refusing while the save cannot be read
+-- Write through chunked storage unless the save is unreadable
 function QueryStore:Persist(data)
     if self.loadError ~= nil then return false, self.loadError end
     if PersistentDB == nil or PersistentDB.SetString == nil or PersistentDB.GetString == nil then
@@ -247,7 +242,7 @@ function QueryStore:Persist(data)
     return true, nil
 end
 
--- Normalize and persist changed data, adopting it only once it is saved
+-- Normalize and save data, adopting it only once saved
 function QueryStore:Commit(nextData)
     normalize(nextData)
     local persisted, reason = self:Persist(nextData)
@@ -256,7 +251,7 @@ function QueryStore:Commit(nextData)
     return true, nil
 end
 
--- Return copies of saved queries for sidebar and editor use
+-- Return copies of the saved queries
 function QueryStore:All()
     local result = {}
     for _, record in ipairs(self.data.queries) do
@@ -265,7 +260,7 @@ function QueryStore:All()
     return result
 end
 
--- Find a saved query and return a copy safe for editing
+-- Return a copy of a saved query
 function QueryStore:Get(queryID)
     queryID = tostring(queryID or "")
     for _, record in ipairs(self.data.queries) do
@@ -275,7 +270,7 @@ function QueryStore:Get(queryID)
 end
 
 
--- Find a conflicting query name while optionally excluding the record being edited
+-- Find a query with this name, except the one being edited
 function QueryStore:FindName(name, exceptID)
     local wanted = string.lower(trim(name))
     exceptID = exceptID ~= nil and tostring(exceptID) or nil
@@ -287,8 +282,8 @@ function QueryStore:FindName(name, exceptID)
     return nil
 end
 
--- Validate and persist a copied query set before adopting the edit in memory. An edited
--- query keeps its folder and place; a new one goes at the end of the top level
+-- Validate and save a query
+-- Edits keep their place; new queries go at the end
 function QueryStore:Save(queryID, name, query)
     local reason
     name, query, reason = validate(name, query)
@@ -325,8 +320,7 @@ function QueryStore:Save(queryID, name, query)
     return true, copyRecord(savedRecord), nil
 end
 
--- Persist a copied query set without the selected record, and out of its folder, before
--- adopting it
+-- Delete a query and remove it from its folder
 function QueryStore:Delete(queryID)
     queryID = tostring(queryID or "")
     local nextData = copyData(self.data)
@@ -342,8 +336,7 @@ function QueryStore:Delete(queryID)
     return self:Commit(nextData)
 end
 
--- List the queries and folders in sidebar order: { kind = "query", query } for a query
--- outside every folder, and { kind = "folder", id, name, collapsed, queries } for a folder
+-- List top-level queries and folders in sidebar order
 function QueryStore:Tree()
     local records = {}
     for _, record in ipairs(self.data.queries) do records[record.id] = record end
@@ -362,7 +355,7 @@ function QueryStore:Tree()
     return nodes
 end
 
--- Return a copy of one folder's name, collapse state, and member count, or nil
+-- Return a copy of a folder's name, state, and count
 function QueryStore:GetFolder(folderID)
     local folder = findFolder(self.data, tostring(folderID or ""))
     if folder == nil then return nil end
@@ -389,8 +382,7 @@ function QueryStore:FolderOf(queryID)
     return nil
 end
 
--- Create a folder, holding a query when one is given: the folder takes the query's place
--- in the top level, or the place just after the query's old folder. Returns the folder ID
+-- Create a folder in a query's place and return its ID
 function QueryStore:CreateFolder(name, queryID)
     local reason
     name, reason = validateFolderName(name)
@@ -423,7 +415,7 @@ function QueryStore:RenameFolder(folderID, name)
     return self:Commit(nextData)
 end
 
--- Remove a folder, keeping its queries, in order, where it was in the top level
+-- Remove a folder, leaving its queries in its place
 function QueryStore:DeleteFolder(folderID)
     folderID = tostring(folderID or "")
     local nextData = copyData(self.data)
@@ -455,8 +447,7 @@ function QueryStore:SetFolderCollapsed(folderID, collapsed)
     return self:Commit(nextData)
 end
 
--- Move a query to the end of a folder, or, when the folder ID is nil, out of its folder to
--- just after it
+-- Move a query into a folder, or just after it with nil
 function QueryStore:MoveToFolder(queryID, folderID)
     queryID = tostring(queryID or "")
     folderID = folderID ~= nil and tostring(folderID) or nil
@@ -474,9 +465,8 @@ function QueryStore:MoveToFolder(queryID, folderID)
     return self:Commit(nextData)
 end
 
--- Move a folder or query one step among its siblings: the top level, or the query's folder.
--- kind is "folder" or "query" and offset is -1 or 1. A move past either end changes nothing
--- and gives no reason
+-- Move a folder or query one step among its siblings
+-- Moving past either end changes nothing
 function QueryStore:Move(kind, entryID, offset)
     if offset ~= -1 and offset ~= 1 then return false, "Choose up or down." end
     entryID = tostring(entryID or "")

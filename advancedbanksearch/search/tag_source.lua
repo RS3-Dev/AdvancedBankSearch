@@ -1,8 +1,5 @@
--- Offer saved queries to Bank Tags' Import window through its published import-source API: the
--- player types a saved query's name, and the source answers with a draft of one tag holding
--- the stacks the query matches now. Bank Tags gives a repeated object its next copy in the
--- order listed, so a draft names exactly the matched stacks only when each object's matched
--- copies are 1 to k; any other match is refused rather than tagging another copy
+-- Offer saved queries as drafts in Bank Tags' Import window
+-- Matches must be copies 1 to k of each object, since Tags numbers copies in order
 
 local Ranking = require("advancedbanksearch/search/ranking")
 
@@ -13,10 +10,10 @@ local OWNER_ID = "advancedbanksearch"
 local OWNER_LABEL = "Advanced Bank Search"
 local PROVIDER_ID = "saved-search"
 local API_KEY = "__banktags_api"
--- Bank Tags reads at most 2,000 draft entries; the row itself is one of them
+-- Bank Tags reads at most 2,000 entries, including the row
 local MAX_STACKS = 1999
 
--- Why a request failed, kept within Bank Tags' 120-character message limit
+-- Failure reasons, within Bank Tags' 120-character limit
 local FAILURES = {
     bank_closed = "Open your bank to convert a saved search.",
     not_all_items = 'Select "All Items" in your bank to convert a saved search.',
@@ -27,14 +24,14 @@ local FAILURES = {
     empty = "This saved search matches nothing in your bank.",
 }
 
--- Create the source for an app, registered with nothing
+-- Create the source before registering it
 function TagSource.new(app)
     return setmetatable({ app = app, api = nil, handle = nil, retired = false, unavailable = nil }, TagSource)
 end
 
--- Find a running Bank Tags API: the injected dependency first, the published copy second
+-- Find Bank Tags' API, injected first, then published
 local function findTags()
-    -- Either may be missing, so both are checked by position rather than with ipairs
+    -- Either may be nil, which would stop ipairs early
     local candidates = { banktags, rawget(_G, API_KEY) }
     for index = 1, 2 do
         local candidate = candidates[index]
@@ -63,8 +60,7 @@ function TagSource:Provider()
     }
 end
 
--- Register the source with the running Bank Tags, unless a newer copy of this plugin took the
--- owner ID there
+-- Register with Bank Tags unless a newer copy owns the ID
 function TagSource:Connect()
     if self.handle ~= nil and self.handle:GetState().live then return true end
     if self.handle ~= nil and self.api.GetState().running then self.retired = true end
@@ -99,7 +95,7 @@ function TagSource:Update()
     self.handle:UpdateImportProvider(PROVIDER_ID, self:Provider())
 end
 
--- Find the first object whose matched copies are not 1 to k, or nil when every one is
+-- Find the first object whose matches are not copies 1 to k
 local function inexactObject(matches)
     local copies = {}
     for _, match in ipairs(matches) do
@@ -117,10 +113,10 @@ local function inexactObject(matches)
     return nil
 end
 
--- Answer one request with a draft of the saved query's current matches, or say why not
+-- Answer with a draft of the query's current matches, or why not
 function TagSource:Answer(request)
     local app = self.app
-    -- Names match as the store compares them, so a name with inner double spaces is found
+    -- Match names as the store does, inner spaces included
     local record = app.queries:FindName(request.input)
     if record == nil then
         request:Fail("No saved search has that name.")

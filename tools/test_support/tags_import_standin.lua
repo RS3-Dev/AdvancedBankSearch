@@ -1,11 +1,6 @@
--- Stand in for Bank Tags' published import-source API, as its CONTRACT.md describes it, so
--- tests can check this plugin's source without building Bank Tags (whose build writes only
--- inside its own repository). It keeps the contract's shapes and limits: a plain root of
--- RegisterExtension, GetState, and LIMITS; read-only handles that a newer owner replaces;
--- provider descriptions validated in full; requests started on a logic tick; and drafts read
--- the way Bank Tags reads them, with a repeated object taking its next copy and at most
--- 2,000 entries counting rows. It is not Bank Tags
--- Kept outside tests/ so tools/check.lua does not count it as a test program
+-- Stand in for Bank Tags' import-source API as CONTRACT.md describes
+-- It keeps the contract's shapes and limits but is not Bank Tags
+-- Kept outside tests/ so tools/check.lua does not run it
 
 local Standin = {}
 Standin.__index = Standin
@@ -13,7 +8,7 @@ Standin.__index = Standin
 local PROVIDER_FIELDS = { label = true, icon = true, input = true, prompt = true, placeholder = true,
     actionLabel = true, unavailable = true, request = true }
 
--- Read text of 1 to limit characters with no markup or control characters
+-- Read 1 to limit characters of text without markup
 local function label(value, limit)
     if type(value) ~= "string" then return nil end
     local text = string.match(value, "^%s*(.-)%s*$")
@@ -21,7 +16,7 @@ local function label(value, limit)
     return text
 end
 
--- Check a provider description as Bank Tags does, returning a copy or nil and why
+-- Validate a provider as Bank Tags does
 local function readProvider(input)
     if type(input) ~= "table" or getmetatable(input) ~= nil then return nil, "not a plain table" end
     for key in next, input do
@@ -40,9 +35,8 @@ local function readProvider(input)
     return record
 end
 
--- Read a draft as Bank Tags' TagDraft does: tags of rows of object IDs, a repeated object
--- taking its next copy across the tag, and at most 2,000 entries counting rows and items.
--- Returns the tags as { name, keys = { "object:<id>:<copy>", ... } } or nil and why
+-- Read a draft as Bank Tags' TagDraft does, up to 2,000 entries
+-- Returns { name, keys = { "object:<id>:<copy>", ... } } tags, or nil and why
 function Standin.ReadDraft(draft)
     if type(draft) ~= "table" or type(draft.tags) ~= "table" or #draft.tags == 0 or #draft.tags > 32 then
         return nil, "a draft is a table with 1 to 32 tags"
@@ -68,7 +62,7 @@ function Standin.ReadDraft(draft)
     return tags
 end
 
--- Create the stand-in, with its plain root in standin.api
+-- Create the stand-in with its root in standin.api
 function Standin.new()
     local self = setmetatable({ owners = {}, providers = {}, running = true, results = {} }, Standin)
     self.api = {
@@ -79,7 +73,7 @@ function Standin.new()
     return self
 end
 
--- Register an owner, replacing an earlier one with the same ID and its sources
+-- Register an owner, replacing any earlier one with that ID
 function Standin:Register(ownerID, ownerLabel)
     if not self.running then return nil, "stale_api" end
     if label(ownerLabel, 64) == nil then return nil, "invalid_label" end
@@ -127,8 +121,7 @@ function Standin:Drop(ownerID)
     end
 end
 
--- Ask a source for a draft as the Import window does; the request starts on the next logic
--- tick, and its single answer is recorded in standin.results[key]
+-- Request a draft next tick and record it in standin.results[key]
 function Standin:Request(key, input)
     local record = self.providers[key]
     assert(record ~= nil and record.unavailable == nil, "the source is not usable")
@@ -160,7 +153,7 @@ function Standin:Request(key, input)
     end)
 end
 
--- Stop, refusing every later call, as Bank Tags shutting down does
+-- Refuse every later call, as Bank Tags does on shutdown
 function Standin:Close()
     self.running = false
     self.owners, self.providers = {}, {}

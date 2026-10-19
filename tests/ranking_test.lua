@@ -1,8 +1,6 @@
 package.path = "./?.lua;" .. package.path
 
--- Rank bank stacks with the real RuneQL: score descending and ties in bank order, copies kept,
--- placeholders left out on request, unreadable text, and price queries, which are never
--- ranked without loaded prices because RuneQL lets a negated clause match a missing field
+-- Rank bank stacks with the real RuneQL
 
 local Ranking = require("advancedbanksearch/search/ranking")
 local ItemFields = require("advancedbanksearch/search/item_fields")
@@ -17,7 +15,7 @@ local NAMES = {
 }
 config = { Obj = { FromID = function(objectID) return NAMES[objectID] end } }
 
--- A snapshot as GetBankItems gives it; 103 is a placeholder and 101 has a second stack
+-- A snapshot where 103 is a placeholder and 101 has two stacks
 local ITEMS = {
     { objectID = 101, copy = 1, quantity = 5, placeholder = false },
     { objectID = 102, copy = 1, quantity = 5, placeholder = false },
@@ -44,7 +42,7 @@ end
 -- Text needs two characters once trimmed
 assert(not Ranking.IsSearchable(" i ") and Ranking.IsSearchable("ir") and Ranking.Normalize("  Iron   Bar ") == "iron bar")
 
--- Ranking sorts by score and keeps bank order for equal scores
+-- Equal scores keep bank order
 local ranked = Ranking.Rank(ITEMS, function(item)
     if item.objectID == 105 then return nil end
     return item.objectID == 104 and 2 or 1
@@ -54,8 +52,8 @@ assert(listed(Ranking.Rank(ITEMS, function() return 1 end, true)) == "101:1 102:
 local slots = Ranking.Slots(ranked)
 assert(slots[1].item == 104 and slots[1].copy == 1 and slots[5].item == 101 and slots[5].copy == 2)
 
--- Real RuneQL: every iron stack matches, in score order with ties in bank order, the
--- placeholder included unless asked otherwise; the lobster never matches
+-- Every iron stack matches by score, then bank order
+-- The placeholder is included unless excluded; the lobster never matches
 local outcome = search("iron")
 assert(outcome.state == "ok")
 local seen = {}
@@ -68,7 +66,7 @@ for index, match in ipairs(outcome.matches) do
 end
 assert(#outcome.matches == 5 and seen["101:1"] and seen["101:2"] and seen["103:1"] and not seen["105:1"])
 assert(#search("iron", { excludePlaceholders = true }).matches == 4)
--- A name the query names exactly ranks first
+-- An exact name match ranks first
 assert(search('name:"iron platebody"').matches[1].objectID == 104)
 -- Quantity is a field RuneQL reads from the stack
 assert(listed(search("qty:[6 TO *]").matches) == "105:1")
@@ -77,20 +75,20 @@ assert(listed(search("qty:[6 TO *]").matches) == "105:1")
 local invalid = search("name:(iron")
 assert(invalid.state == "invalid" and #invalid.reason > 0, invalid.reason)
 
--- RuneQL's own semantics, pinned: a range on a missing field matches nothing, and a negated
--- range matches every row that has no price, so an unpriced ranking would be wrong, not empty
+-- RuneQL matches nothing for a missing field, but a negated range matches it
+-- So an unpriced ranking would be wrong, not empty
 local plan = runeql.Compile("iron AND NOT price:[1 TO 100]")
 assert(plan ~= nil and plan:Score({ name = "Iron bar", fields = {} }) ~= nil)
 assert(plan:Score({ name = "Iron bar", fields = { price = 50 } }) == nil)
--- A query of only a negated clause matches nothing, as in Lucene
+-- A lone negated clause matches nothing, as in Lucene
 assert(runeql.Compile("NOT price:[1 TO *]"):Score({ name = "Iron bar", fields = {} }) == nil)
 assert(runeql.Compile("price:[1 TO *]"):Score({ name = "Iron bar", fields = {} }) == nil)
--- Requirements name fields in lower case, however they were typed
+-- Requirements name fields in lower case
 assert(ItemFields.NeedsPrices(runeql.Compile("PRICE:[1 TO *]")))
 assert(ItemFields.NeedsPrices(runeql.Compile("iron AND gehigh:[1 TO 5]")))
 assert(not ItemFields.NeedsPrices(runeql.Compile("iron AND qty:[1 TO *]")))
 
--- A price query without GE Prices, or before its prices load, is not ranked at all
+-- Price queries are not ranked until GE Prices is ready
 assert(search("iron AND NOT price:[1 TO 100]").state == "needs_prices")
 local ready = false
 local prices = {
@@ -103,7 +101,7 @@ local prices = {
     end,
 }
 assert(search("price:[100 TO *]", { prices = prices }).state == "prices_loading")
--- Once ready, prices join each stack; a missing or zero price is no price
+-- Ready prices join each stack; missing or zero means no price
 ready = true
 assert(listed(search("price:[100 TO *]", { prices = prices }).matches) == "105:1")
 assert(listed(search("gelow:[1 TO 50]", { prices = prices }).matches) == "101:1 101:2")

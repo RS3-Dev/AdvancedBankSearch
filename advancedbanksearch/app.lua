@@ -1,8 +1,5 @@
--- Compose Advanced Bank Search: saved queries and their folders, the Search tab and its row
--- menus, the search and query pages, the wait for GE prices, and the connection to Bank
--- Core's public API. Through that API it registers its mounted tab, two pages, and a
--- listener, and reads the bank only through Bank Core's item snapshots. RuneQL, GE Prices, and Bank Tags are optional dependencies, each
--- read only while the host last reported it loaded
+-- Show RuneQL search and saved queries through Bank Core's API
+-- RuneQL, GE Prices, and Bank Tags are read only while reported loaded
 
 local FolderDialog = require("advancedbanksearch/search/folder_dialog")
 local ItemFields = require("advancedbanksearch/search/item_fields")
@@ -23,10 +20,10 @@ local SEARCH_PAGE = "search"
 local QUERY_PAGE = "query"
 local CONTENT_EVENT = "advancedbanksearch_content"
 local PRICE_WAIT_EVENT = "advancedbanksearch_price_wait"
--- How often a price wait checks GE Prices, and when it gives up, in logic ticks
+-- Logic ticks between GE Prices checks, and before giving up
 local PRICE_CHECK_TICKS = 30
 local PRICE_WAIT_LIMIT = 1800
--- Where each optional dependency publishes its API when its injected copy is missing
+-- Where each dependency publishes its API if not injected
 local PUBLISHED = { bankcore = "__bankcore_api", runeql = "__runeql_api", geprices = "__geprices_api" }
 -- Readiness reasons that mean the bank is not open at all
 local CLOSED = { stale_api = true, not_ready = true, bank_closed = true }
@@ -36,7 +33,7 @@ local CONNECTED = "Advanced Bank Search is in your bank: open the bank and choos
 local REPLACED = "A newer copy of Advanced Bank Search took over; this copy is idle."
 local NEEDS_RUNEQL = "Searching needs RuneQL. Enable RuneQL to search your bank."
 
--- What a page shows, and the status line beside it, for each outcome that is not a list of items
+-- Page text and status line for each outcome without items
 local OUTCOMES = {
     empty = { label = "No items match", status = "No items match." },
     needs_runeql = { label = "This search needs RuneQL", status = NEEDS_RUNEQL },
@@ -47,10 +44,9 @@ local OUTCOMES = {
     no_items = { label = "The bank's items are not available yet", status = "Open All Items to search your bank." },
 }
 
--- Find a dependency's API: the injected global first, the published copy second, and only one
--- that offers the function the plugin calls
+-- Find a dependency's API that offers the called function
 local function findDependency(injected, name, method)
-    -- Either may be missing, so both are checked by position rather than with ipairs
+    -- Either may be nil, which would stop ipairs early
     local candidates = { injected, rawget(_G, PUBLISHED[name]) }
     for index = 1, 2 do
         local candidate = candidates[index]
@@ -59,32 +55,31 @@ local function findDependency(injected, name, method)
     return nil
 end
 
--- Load the saved queries and build the tab, connected to nothing and subscribed to nothing
+-- Load saved queries and build the tab, before connecting
 function App.new()
     local app = setmetatable({
         queries = QueryStore.new(),
-        -- Whether the host last reported each optional dependency loaded; an unloaded plugin's
-        -- injected global and published copy can outlive it
+        -- Whether each optional dependency was last reported loaded
+        -- An unloaded plugin's globals can outlive it
         enabled = { runeql = true, geprices = true, banktags = true },
         bank = nil,
         handle = nil,
         -- The last bank snapshot read, kept while Bank Core is still building
         snapshot = nil,
-        -- The search text, and a serial that changes with it so a new search starts at the top
+        -- The search text, with a serial so a new search starts at the top
         text = "",
         serial = 0,
-        -- The query chosen in the tab, the one the query page shows, the one whose delete
-        -- waits for confirmation, and the last match count of each
+        -- Chosen, shown, and delete-pending queries, plus last match counts
         selectedQuery = nil,
         pageQuery = nil,
         confirmDelete = nil,
         counts = {},
-        -- What Bank Core shows: the page and key, and what each page was last given
+        -- The shown page and key, and each page's last sent signature
         shownPage = nil,
         shownKey = nil,
         published = {},
-        -- The outcome the shown page was built from, the price wait for the shown key, and
-        -- the key whose wait gave up, which stays failed until GE Prices or the key changes
+        -- The shown outcome, its price wait, and the key that gave up
+        -- A failed key stays failed until GE Prices or the key changes
         outcome = nil,
         priceWait = nil,
         pricesFailed = nil,
@@ -105,13 +100,13 @@ function App.new()
     return app
 end
 
--- Return RuneQL's API while the host reports it loaded, or nil
+-- Return RuneQL's API while it is reported loaded
 function App:RuneQL()
     if not self.enabled.runeql then return nil end
     return findDependency(runeql, "runeql", "Compile")
 end
 
--- Return the GE price service while the host reports it loaded, or nil
+-- Return the GE price service while it is reported loaded
 function App:Prices()
     if not self.enabled.geprices then return nil end
     return findDependency(geprices, "geprices", "getPrice")
@@ -126,16 +121,16 @@ function App:Start()
     self.tagSource:Connect()
 end
 
--- Report whether this plugin's owner is registered with a running Bank Core
+-- Report whether this plugin is registered with Bank Core
 function App:IsConnected()
     return self.handle ~= nil and self.handle:GetState().live == true
 end
 
--- Register the Search tab, its two pages, and the listener with the running Bank Core
+-- Register the Search tab, its two pages, and the listener
 function App:Connect()
     if self.shutDown then return false, "stopped" end
     if self:IsConnected() then return true end
-    -- A newer load of this plugin took the owner ID; taking it back would undo that
+    -- A newer load of this plugin owns the ID now, so leave it
     if self.handle ~= nil and self.bank.GetState().running then
         self.handle, self.bank, self.retired = nil, nil, true
         self:Disconnect()
@@ -174,8 +169,7 @@ function App:Connect()
     return true
 end
 
--- Drop the owner handle, the row menus, the price wait, the editor and folder dialog, and the
--- bank snapshot; saved queries stay
+-- Drop the handle, menus, price wait, dialogs, and snapshot
 function App:Disconnect()
     self.menus:Stop()
     self:StopPriceWait()
@@ -189,7 +183,7 @@ function App:Disconnect()
     self:UpdatePanelNotice()
 end
 
--- Follow the host's report that an optional dependency loaded or unloaded
+-- Follow a dependency loading or unloading
 function App:DependencyChanged(name, enabled)
     if self.enabled[name] == nil then return end
     self.enabled[name] = enabled == true
@@ -211,8 +205,7 @@ function App:DependencyChanged(name, enabled)
     self:Refresh()
 end
 
--- A closed bank drops the snapshot, the editor, and the folder dialog; the snapshot is read
--- again on reopening
+-- Drop the snapshot, editor, and folder dialog when the bank closes
 function App:OnState(state)
     if not state.running or CLOSED[state.reason] then
         self.snapshot = nil
@@ -221,7 +214,7 @@ function App:OnState(state)
     end
 end
 
--- Remember which of this plugin's pages Bank Core shows; leaving a page ends its price wait
+-- Track the shown page; leaving a page ends its price wait
 function App:OnPage(pageID, key)
     self.shownPage, self.shownKey = pageID, key
     if self.priceWait ~= nil and self.priceWait.key ~= key then self:StopPriceWait() end
@@ -229,13 +222,13 @@ function App:OnPage(pageID, key)
     self:Refresh()
 end
 
--- Rank the shown page again over the bank's new items, keeping its key and scroll position
+-- Rank the shown page again, keeping its key and scroll
 function App:OnBankItems()
     self:ReadBank()
     self:RefreshPage()
 end
 
--- Read the bank's items, keeping the last snapshot while Bank Core is still building
+-- Read the bank, keeping the snapshot while Core builds
 function App:ReadBank()
     if self.handle == nil then return nil end
     local snapshot, reason = self.handle:GetBankItems()
@@ -247,7 +240,7 @@ function App:ReadBank()
     return self.snapshot
 end
 
--- Rank text over the bank: an outcome with a state and, when "ok", its matches
+-- Rank text over the bank into an outcome
 function App:Run(text, excludePlaceholders)
     local engine = self:RuneQL()
     if engine == nil then return { state = "needs_runeql" } end
@@ -257,14 +250,14 @@ function App:Run(text, excludePlaceholders)
         excludePlaceholders = excludePlaceholders, prices = self:Prices(), nameOf = Ranking.NameReader() })
 end
 
--- Lay out an outcome as page rows: its stacks, or one label saying why there are none
+-- Lay out an outcome as stacks, or one label saying why not
 local function layoutFor(outcome)
     if outcome.state == "ok" and #outcome.matches > 0 then return { { slots = Ranking.Slots(outcome.matches) } } end
     local described = OUTCOMES[outcome.state == "ok" and "empty" or outcome.state]
     return { { label = described.label } }
 end
 
--- Say what an outcome found in the tab's status line
+-- Show an outcome in the tab's status line
 function App:ShowOutcome(outcome)
     if outcome.state == "ok" then
         local count = #outcome.matches
@@ -276,7 +269,7 @@ function App:ShowOutcome(outcome)
     end
 end
 
--- Summarise a page as text, so an unchanged page is not sent to Bank Core again
+-- Summarise a page so unchanged pages are not resent
 local function signature(page)
     local parts = { page.title, page.key }
     for _, row in ipairs(page.layout) do
@@ -289,7 +282,7 @@ local function signature(page)
     return table.concat(parts, "\n")
 end
 
--- Describe the page for the search text or a saved query, with the outcome it shows
+-- Describe the search or saved-query page and its outcome
 function App:BuildPage(pageID)
     if pageID == SEARCH_PAGE then
         local outcome = self:Run(self.text, false)
@@ -302,8 +295,8 @@ function App:BuildPage(pageID)
     return { title = record.name, key = "query:" .. record.id, layout = layoutFor(outcome) }, outcome
 end
 
--- Give Bank Core a page when it changed, and follow its outcome: the status line, and a wait
--- while GE prices load
+-- Send a changed page to Bank Core and show its status
+-- Wait for GE prices when the outcome needs them
 function App:PutPage(pageID)
     local page, outcome = self:BuildPage(pageID)
     if page == nil then return false, "unknown_query" end
@@ -330,8 +323,8 @@ function App:PutPage(pageID)
     return true, page.key
 end
 
--- Show one of this plugin's pages: through the tab's context, so a refusal shows Bank Core's
--- View All guidance, or the handle when the tab is not mounted
+-- Show a page through the tab, or the handle when unmounted
+-- Going through the tab shows Core's View All guidance on refusal
 function App:ShowPage(pageID)
     local ok, key = self:PutPage(pageID)
     if not ok then return false end
@@ -350,7 +343,7 @@ function App:ShowPage(pageID)
     return opened, reason
 end
 
--- Rank the shown page again, as after a bank or dependency change
+-- Rank the shown page again after a change
 function App:RefreshPage()
     if self.handle == nil or self.shownPage == nil then return end
     if self.shownPage == QUERY_PAGE and self.queries:Get(self.pageQuery) == nil then
@@ -361,8 +354,7 @@ function App:RefreshPage()
     self:Refresh()
 end
 
--- Follow the search field: text long enough shows the search page from the top, and shorter
--- text leaves it
+-- Show the search page for long enough text, or leave it
 function App:SetText(text)
     self.text = tostring(text or "")
     self.confirmDelete = nil
@@ -384,7 +376,7 @@ function App:SetText(text)
     self:Refresh()
 end
 
--- Show a saved query's page, or return to the bank's own view when it is already shown
+-- Show a saved query's page, or leave it if already shown
 function App:ChooseQuery(queryID)
     self.confirmDelete = nil
     if self.queries:Get(queryID) == nil then return false end
@@ -407,8 +399,8 @@ function App:ChooseQuery(queryID)
     return opened
 end
 
--- Check every PRICE_CHECK_TICKS ticks whether prices loaded for the shown page, then rank it
--- again; give up after the limit. The wait ends when its page or key is no longer shown
+-- Recheck prices every PRICE_CHECK_TICKS ticks, up to the limit
+-- The wait ends once its page or key is no longer shown
 function App:StartPriceWait(key, pageID)
     if self.priceWait ~= nil and self.priceWait.key == key then return end
     self:StopPriceWait()
@@ -451,7 +443,7 @@ function App:EditQuery(queryID)
     if record ~= nil then self:OpenEditor(record) end
 end
 
--- Delete the chosen query once its deletion is confirmed by pressing Delete again
+-- Delete the chosen query when Delete is pressed twice
 function App:DeleteQuery()
     local record = self.queries:Get(self.selectedQuery)
     if record == nil then return false end
@@ -485,7 +477,7 @@ local function windowParent()
         or ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
 end
 
--- Open the query editor, replacing one already open. Saving needs RuneQL
+-- Open the query editor, replacing any open one
 function App:OpenEditor(record)
     self:CloseEditor()
     self:CloseFolderDialog()
@@ -535,7 +527,7 @@ function App:CloseFolderDialog()
     if dialog ~= nil then pcall(function() dialog:Destroy() end) end
 end
 
--- Choose a query's folder: another folder, no folder, or a new folder holding it
+-- Choose a query's folder, no folder, or a new folder
 function App:OpenFolderChooser(queryID)
     local record = self.queries:Get(queryID)
     if record == nil then return false end
@@ -559,22 +551,21 @@ function App:OpenRenameFolder(folderID)
         onSave = function(name) return self:RenameFolder(folderID, name) end })
 end
 
--- Redraw after a folder or order change; a change refused from the tab says why there, and
--- one from a dialog says why in the dialog. Returns the change's success and reason
+-- Redraw after a folder or order change and report any refusal
 function App:FolderChanged(fromTab, ok, reason)
     if not ok and reason ~= nil and fromTab then self:ShowStatus(reason, true) end
     self:Refresh()
     return ok, reason
 end
 
--- Collapse or expand a folder; the chosen query and the shown page stay as they are
+-- Collapse or expand a folder, keeping the shown page
 function App:ToggleFolder(folderID)
     local folder = self.queries:GetFolder(folderID)
     if folder == nil then return false end
     return self:FolderChanged(true, self.queries:SetFolderCollapsed(folderID, not folder.collapsed))
 end
 
--- Move a query into a folder, or out of its folder with nil
+-- Move a query into a folder, or out with nil
 function App:MoveQueryToFolder(queryID, folderID)
     return self:FolderChanged(false, self.queries:MoveToFolder(queryID, folderID))
 end
@@ -600,8 +591,8 @@ function App:MoveEntry(kind, entryID, offset)
     return self:FolderChanged(true, self.queries:Move(kind, entryID, offset))
 end
 
--- Save a query from the editor once RuneQL can read it, then show the change; a failed save
--- changes nothing. A saved query's old count is dropped, and counted again when its page shows
+-- Save a query from the editor once RuneQL can read it
+-- A saved query is counted again when its page shows
 function App:SaveQuery(queryID, name, query)
     local engine = self:RuneQL()
     if engine == nil then return false, NEEDS_RUNEQL end
@@ -644,7 +635,7 @@ function App:UpdatePanelNotice()
     if self.panel ~= nil then self.panel.content = self:PanelNotice() end
 end
 
--- Show the notice on this plugin's own panel, connecting first if Bank Core started
+-- Show the panel notice, connecting first if Bank Core started
 function App:CreatePanel(parent)
     if self.shutDown then return end
     self:Connect()
@@ -662,7 +653,7 @@ function App:DestroyPanel()
     if panel ~= nil then pcall(function() panel:Destroy() end) end
 end
 
--- Stop the plugin: release its panel, menus, windows, price wait, and Bank Core registration
+-- Release the panel, menus, windows, price wait, and registration
 function App:Shutdown()
     if self.shutDown then return end
     self.shutDown = true
