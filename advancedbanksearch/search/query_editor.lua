@@ -19,6 +19,8 @@ function QueryEditor.new(parent, options)
     local self = setmetatable({
         queryID = record.id,
         onSave = options.onSave,
+        -- Why saving is not possible now, kept on show while the player types
+        blocked = options.blocked,
     }, QueryEditor)
 
     self.window = prettyui.Window.new(parent, {
@@ -57,7 +59,7 @@ function QueryEditor.new(parent, options)
         placeholder = "Query name",
         maxLength = QueryStore.MAX_NAME_LENGTH,
         onChange = function()
-            if self.status ~= nil then self.status.hidden = true end
+            if self.status ~= nil and self.blocked == nil then self.status.hidden = true end
         end,
     })
     self.queryLabel = prettyui.Text.new(content, {
@@ -95,7 +97,7 @@ function QueryEditor.new(parent, options)
         contentMargin = ui.Margin.new(8, 8, 8, 8),
         onChange = function(_, _, content)
             self:UpdateCharacterCount(content)
-            if self.status ~= nil then self.status.hidden = true end
+            if self.status ~= nil and self.blocked == nil then self.status.hidden = true end
         end,
     })
     self.characterCount = prettyui.Text.new(content, {
@@ -140,6 +142,10 @@ function QueryEditor.new(parent, options)
         height = 28,
     })
     self:UpdateCharacterCount(record.query or "")
+    if self.blocked ~= nil then
+        self.saveButton:SetDisabled(true)
+        self:SetStatus(self.blocked)
+    end
     return self
 end
 
@@ -158,7 +164,7 @@ end
 
 -- Submit the name and expression to the save callback and close only after success
 function QueryEditor:Save()
-    if self.onSave == nil then return end
+    if self.onSave == nil or self.blocked ~= nil then return end
     local saved, reason = self.onSave(
         self.queryID,
         self.nameField:GetText(),

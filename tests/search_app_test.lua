@@ -1,0 +1,290 @@
+package.path = "./?.lua;./?/init.lua;" .. package.path
+
+-- Drive the built Advanced Bank Search through the real Bank Core and the installed RuneQL:
+-- the search field opening and leaving its page, a new key per search and the same key when
+-- the bank changes, placeholders on search pages but not query pages, unreadable text,
+-- saved queries made, edited, refused, and deleted, price queries waiting for GE prices,
+-- stale waits dropped, and RuneQL or GE Prices unloading
+-- FAKE HOST: stand-in loader, components, and widgets, not the game client
+
+local Harness = require("tools/test_support/search_harness")
+
+local h = Harness.new("search_app")
+local host = h.bankHost
+h:NameObjects({ { 101, "Iron bar" }, { 102, "Iron ore" }, { 103, "Iron axe" }, { 104, "Iron platebody" },
+    { 105, "Lobster" } })
+-- 103 is a placeholder; 101 has a second stack at the end
+host:SetItems({ { 101, 5 }, { 102, 5 }, { 103, 0 }, { 104, 5 }, { 105, 9 }, { 101, 3 } })
+
+h:LoadCore()
+h:LoadRuneQL()
+h:LoadSearch()
+local app = h:App()
+assert(app:IsConnected() and app:RuneQL() ~= nil and app:Prices() == nil)
+local session, layout = h:OpenBank()
+local service = session.extensionPages
+h:Tick(2)
+local controls = app.tab.controls
+assert(controls ~= nil and h:TabParent() ~= nil, "the Search tab did not mount")
+
+-- Count the pages sent to Bank Core
+local updates = 0
+local updatePage = service.UpdatePage
+service.UpdatePage = function(pages, owner, pageID, page)
+    updates = updates + 1
+    return updatePage(pages, owner, pageID, page)
+end
+local function takeUpdates()
+    local count = updates
+    updates = 0
+    return count
+end
+
+-- Type into the search field as the host reports it
+local function type(text)
+    controls.field.root.content = text
+    controls.field.root.hooks[ui.Hook.ONCONTENTCHANGED](controls.field.root, "change", text)
+    h:Tick(2)
+end
+
+-- Press a PrettyUI button
+local function press(button)
+    button.root.hooks[ui.Hook.ONCLICK]()
+    h:Tick(2)
+end
+
+-- Describe the shown page top to bottom: labels, then stacks as object:copy, ? for placeholders
+local function shown()
+    local entries = {}
+    for _, heading in ipairs(layout.pageState:GetLayoutSections()) do
+        entries[#entries + 1] = { y = heading.y, x = -1, text = "[" .. heading.label .. "]" }
+    end
+    for _, entry in ipairs(layout:VisibleMirrorEntries()) do
+        entries[#entries + 1] = { y = entry.y, x = entry.x,
+            text = string.gsub(entry.layoutKey, "^object:", "") .. (entry.placeholder and "?" or "") }
+    end
+    table.sort(entries, function(a, b)
+        if a.y == b.y then return a.x < b.x end
+        return a.y < b.y
+    end)
+    local parts = {}
+    for index, entry in ipairs(entries) do parts[index] = entry.text end
+    return table.concat(parts, " ")
+end
+
+-- The shown page's key, or nil in the bank's own view
+local function key()
+    return layout.selectedTag ~= nil and layout.pageState.view.key or nil
+end
+
+-- List the saved query rows as drawn
+local function rows()
+    local labels = {}
+    for index, entry in ipairs(controls.list.rows) do labels[index] = entry.entry.label end
+    return table.concat(labels, " | ")
+end
+
+-- Searching -----------------------------------------------------------------------------
+
+-- One character shows nothing; a longer search opens the search page from the top. RuneQL
+-- matches whole terms, as the old search did
+type("i")
+assert(key() == nil and app.shownPage == nil)
+type("iron")
+assert(key() == "search:1" and app.shownPage == "search", tostring(key()))
+assert(service.pages["__bankutils_ext:advancedbanksearch/search"].title == "Search")
+-- Every iron stack, the placeholder included as in the old name search, and never the lobster
+local first = shown()
+assert(string.find(first, "103:1?", 1, true) and string.find(first, "101:2", 1, true) and not string.find(first, "105"), first)
+assert(controls.status.content == "5 matches.", controls.status.content)
+-- New text is a new search, so its key changes and it starts at the top
+type("iron bar")
+assert(key() == "search:2" and string.find(shown(), "^101:1 101:2"), shown())
+
+-- A bank change ranks the same search again under the same key
+takeUpdates()
+host:Rebuild(function(specs)
+    specs[1][2] = 0
+    return specs
+end)
+layout:HandleInventoryUpdate()
+h:Tick(4)
+assert(key() == "search:2")
+assert(string.find(shown(), "101:1?", 1, true), shown())
+-- A bank change that leaves the results as they were sends nothing
+takeUpdates()
+host:Rebuild()
+layout:HandleInventoryUpdate()
+h:Tick(4)
+assert(takeUpdates() == 0)
+
+-- Text RuneQL cannot read shows why
+type("name:(iron")
+assert(shown() == "[RuneQL could not read this search]", shown())
+assert(string.find(controls.status.content, "^RuneQL could not read this search: "))
+-- Nothing found says so
+type("dragon")
+assert(shown() == "[No items match]" and controls.status.content == "No items match.")
+-- Clearing the text returns to the bank's own view
+type("")
+assert(key() == nil and app.shownPage == nil)
+host:SetItems({ { 101, 5 }, { 102, 5 }, { 103, 0 }, { 104, 5 }, { 105, 9 }, { 101, 3 } })
+layout:HandleInventoryUpdate()
+h:Tick(4)
+
+-- Saved queries -------------------------------------------------------------------------
+
+assert(rows() == "" and not controls.empty.hidden)
+assert(controls.edit.disabled and controls.delete.disabled)
+press(controls.new)
+local editor = app.editor
+assert(editor ~= nil and editor.queryID == nil)
+editor.nameField:SetText("Iron")
+editor.queryField:SetText("iron")
+press(editor.saveButton)
+assert(app.editor == nil and rows() == "Iron" and app.selectedQuery == "1")
+assert(h.databases.advancedbanksearch["advancedbanksearch:queries:v1:manifest"] ~= nil)
+
+-- Choosing it shows its page without the placeholder, and its count joins the row
+assert(controls.list:Click("1"))
+h:Tick(2)
+assert(key() == "query:1" and service.pages["__bankutils_ext:advancedbanksearch/query"].title == "Iron")
+assert(not string.find(shown(), "?", 1, true) and string.find(shown(), "101:2", 1, true), shown())
+assert(rows() == "Iron (4)", rows())
+-- Choosing it again returns to the bank's own view
+assert(controls.list:Click("1"))
+h:Tick(2)
+assert(key() == nil)
+
+-- Editing renames the shown page
+assert(controls.list:Click("1"))
+h:Tick(2)
+press(controls.edit)
+app.editor.nameField:SetText("Bars")
+app.editor.queryField:SetText('name:"iron bar"')
+press(app.editor.saveButton)
+h:Tick(2)
+assert(service.pages["__bankutils_ext:advancedbanksearch/query"].title == "Bars" and key() == "query:1")
+assert(shown() == "101:1 101:2" and rows() == "Bars (2)", shown())
+
+-- A refused save is reported in the editor; nothing changes and the editor stays open
+local database = h.search.env.PersistentDB
+h.search.env.PersistentDB = { GetString = database.GetString, SetString = function() return false end }
+press(controls.new)
+app.editor.nameField:SetText("Lobster")
+app.editor.queryField:SetText("lobster")
+press(app.editor.saveButton)
+assert(app.editor ~= nil and app.editor.status.content == "PersistentDB could not save RuneQL chunk 1.")
+assert(app.queries:FindName("Lobster") == nil and rows() == "Bars (2)")
+h.search.env.PersistentDB = database
+press(app.editor.saveButton)
+assert(app.editor == nil and rows() == "Bars (2) | Lobster")
+
+-- Saving another query selects it but leaves the shown page as it was
+assert(key() == "query:1" and app.selectedQuery == "2")
+
+-- Deleting asks once, then deletes and leaves the query's page
+assert(controls.list:Click("1"))
+h:Tick(2)
+assert(key() == nil and app.selectedQuery == "1")
+assert(controls.list:Click("1"))
+h:Tick(2)
+assert(key() == "query:1")
+press(controls.delete)
+assert(app.queries:Get("1") ~= nil and controls.status.content == 'Press Delete again to delete "Bars".')
+press(controls.delete)
+assert(app.queries:Get("1") == nil and key() == nil and rows() == "Lobster")
+
+-- Price queries -------------------------------------------------------------------------
+
+-- Without GE Prices a price query is not ranked: its page says it needs GE Prices
+type("iron AND NOT price:[1 TO 100]")
+assert(shown() == "[This search needs GE Prices]", shown())
+assert(app.priceWait == nil)
+-- GE Prices loads but has no prices yet: the page waits and checks every 30 ticks
+local ready = false
+local prices = {
+    isReady = function() return ready end,
+    getPrice = function(objectID)
+        if objectID == 101 then return { high = 50, low = 40 } end
+        error("Price not found for itemId: " .. tostring(objectID))
+    end,
+}
+h.host.exports.geprices = prices
+h.host:Notify("geprices", true, true)
+assert(app:Prices() == prices)
+type("iron AND NOT price:[1 TO 100] ")
+assert(shown() == "[Waiting for GE prices...]" and app.priceWait ~= nil, shown())
+assert(controls.status.content == "Waiting for GE prices...")
+-- A check before the 30th tick finds nothing, however ready prices are
+local wait = app.priceWait
+while wait.ticks < 28 do h:Tick() end
+ready = true
+h:Tick()
+assert(app.priceWait == wait and shown() == "[Waiting for GE prices...]")
+h:Tick()
+assert(wait.ticks == 30 and app.priceWait == nil)
+h:Tick(2)
+-- Prices loaded: the iron stacks without a price below 100 are ranked
+assert(app.priceWait == nil and h.bankHost:Listener("advancedbanksearch_price_wait") == nil)
+assert(not string.find(shown(), "101", 1, true) and string.find(shown(), "102:1", 1, true), shown())
+
+-- A wait that belongs to an earlier search is dropped when the search changes
+ready = false
+type("price:[1 TO *]")
+assert(app.priceWait ~= nil)
+local waitKey = app.priceWait.key
+type("lobster")
+assert(app.priceWait == nil and key() ~= waitKey and shown() == "105:1", shown())
+ready = true
+for _ = 1, 60 do h:Tick() end
+assert(shown() == "105:1")
+
+-- A wait gives up after 1,800 ticks and says so; the query is kept
+ready = false
+type("price:[1 TO *]")
+for _ = 1, 1800 do h:Tick() end
+assert(app.priceWait == nil and shown() == "[GE prices did not load]", shown())
+assert(controls.status.content == "GE prices did not load; check GE Prices' HTTP access.")
+
+-- GE Prices unloading ends a wait; its stale global is no longer read
+type("price:[2 TO *]")
+assert(app.priceWait ~= nil)
+h.host:Notify("geprices", false, false)
+assert(app.priceWait == nil and app:Prices() == nil and rawget(h.search.env, "geprices") == prices)
+h:Tick(2)
+assert(shown() == "[This search needs GE Prices]", shown())
+
+-- RuneQL unloading ----------------------------------------------------------------------
+
+-- The page closes, the field is disabled, saved queries stay listed, and the editor cannot save
+h.host:Notify("runeql", false, false)
+h:Tick(2)
+assert(key() == nil and app:RuneQL() == nil and controls.field.disabled)
+assert(rows() == "Lobster" and controls.status.content == "Searching needs RuneQL. Enable RuneQL to search your bank.")
+press(controls.new)
+assert(app.editor.saveButton.disabled and app.editor.status.content == "Searching needs RuneQL. Enable RuneQL to search your bank.")
+press(app.editor.saveButton)
+assert(app.editor ~= nil and app.queries:FindName("") == nil and #app.queries:All() == 1)
+app:CloseEditor()
+assert(controls.list:Click("2"))
+h:Tick(2)
+assert(key() == nil)
+-- RuneQL loads again and searching works
+h.host:Notify("runeql", true, true)
+h:Tick()
+assert(not controls.field.disabled)
+type("lobster")
+assert(shown() == "105:1")
+
+-- Closing the bank leaves the page and closes the editor
+press(controls.new)
+assert(app.editor ~= nil)
+h.bankHost:UnmountBankWindow()
+session.layout:Restore()
+h:Tick(2)
+assert(app.editor == nil and app.shownPage == nil)
+
+h.host:Unload("advancedbanksearch")
+h.host:Unload("bankcore")
+print("search_app_test: ok")
