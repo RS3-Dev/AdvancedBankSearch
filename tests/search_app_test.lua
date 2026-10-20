@@ -246,6 +246,9 @@ end
 press(controls.new)
 local editor = app.editor
 assert(editor ~= nil and editor.queryID == nil and shownWindows == 1)
+-- New queries start in Visual; these are typed in Advanced
+assert(editor.mode == "visual")
+press(editor.advancedButton)
 editor.nameField:SetText("Iron")
 editor.queryField:SetText("iron")
 -- Saving compiles at once, not after a pause
@@ -285,6 +288,7 @@ assert(shown() == "101:1 101:2" and rows() == "Bars (2)", shown())
 local database = h.search.env.PersistentDB
 h.search.env.PersistentDB = { GetString = database.GetString, SetString = function() return false end }
 press(controls.new)
+press(app.editor.advancedButton)
 app.editor.nameField:SetText("Lobster")
 app.editor.queryField:SetText("lobster")
 press(app.editor.saveButton)
@@ -309,6 +313,7 @@ local before = stored()
 local unreadable, unreadableReason = app:RuneQL().Compile("iron AND (")
 assert(unreadable == nil and unreadableReason ~= nil)
 press(controls.new)
+press(app.editor.advancedButton)
 app.editor.nameField:SetText("Broken")
 app.editor.queryField:SetText("iron AND (")
 press(app.editor.saveButton)

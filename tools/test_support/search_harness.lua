@@ -109,6 +109,40 @@ function Harness.KeepNamedHooks()
     end
 end
 
+-- Give the stand-in controls what PrettyUI's own have
+-- SimpleButton lights with SetActive, and combo box IDs must be whole numbers
+-- The client's native combo field fails on other IDs
+function Harness.FollowPrettyUIControls()
+    local newButton = prettyui.SimpleButton.new
+    prettyui.SimpleButton.new = function(...)
+        local button = newButton(...)
+        button.active = false
+        function button:SetActive(active) self.active = active == true end
+        return button
+    end
+    -- Refuse an entry ID that is not a whole number
+    local function wholeID(entryID)
+        if math.type(entryID) ~= "integer" then error("combo box entry IDs must be integers", 3) end
+    end
+    local newBox = prettyui.ComboBox.new
+    prettyui.ComboBox.new = function(parent, options)
+        for _, entry in ipairs(options.entries or {}) do wholeID(entry.id) end
+        if options.selectedID ~= nil then wholeID(options.selectedID) end
+        local box = newBox(parent, options)
+        local setEntries, select = box.SetEntries, box.Select
+        function box:SetEntries(entries, selectedID)
+            for _, entry in ipairs(entries) do wholeID(entry.id) end
+            if selectedID ~= nil then wholeID(selectedID) end
+            return setEntries(self, entries, selectedID)
+        end
+        function box:Select(entryID, triggerEvents)
+            wholeID(entryID)
+            return select(self, entryID, triggerEvents)
+        end
+        return box
+    end
+end
+
 -- Run every subscription a component has for a hook
 function Harness.Fire(node, hook, ...)
     local subscriptions = node.subscriptions[hook] or {}
@@ -129,6 +163,7 @@ function Harness.new(name, options)
     bankHost:InstallSidebarWidgets()
     bankHost:InstallWindowWidgets()
     bankHost:InstallPanelWidgets()
+    Harness.FollowPrettyUIControls()
     -- Host values the query editor reads that the stand-in lacks
     ui.Margin = { new = function(...) return { ... } end }
     ui.AlignMode.BOTTOMRIGHT = 2
