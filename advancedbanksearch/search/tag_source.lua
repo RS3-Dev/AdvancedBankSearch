@@ -1,5 +1,5 @@
 -- Offer saved queries as drafts in Bank Tags' Import window
--- Each object's matches must be copies 1, 2, 3 and so on, since Tags numbers copies in order
+-- Matches must include every copy from 1 onward, as Bank Tags numbers them
 
 local Ranking = require("advancedbanksearch/search/ranking")
 
