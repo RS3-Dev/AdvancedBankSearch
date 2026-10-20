@@ -17,6 +17,8 @@ GE Prices is a stand-in that follows its README (`isReady()`, and `getPrice(id)`
 
 Bank Tags is not built here: its build writes only inside its own repository. The import source is tested against a stand-in import registry that follows Bank Tags' `CONTRACT.md` and reads drafts the way Bank Tags does: a repeated object takes its next copy, and a draft holds at most 2,000 entries.
 
+The query builder test checks the RuneQL text visual conditions give, then compiles and evaluates it with the installed RuneQL: phrases and words, escaped quotes and syntax, all and any, number bounds and refusals, and price conditions on stacks without prices, ranked through the real price wait. The editor test drives the editor in the mounted tab: adding and removing conditions, number and name comparisons, switching between Visual and Advanced, saving, reopening, a typed query left alone, and cleanup on close and unload. It also checks that the controls the editor calls exist in PrettyUI's own source. Bank Core's stand-in `SimpleButton` gets PrettyUI's `SetActive`, and its `ComboBox` refuses entry IDs that are not whole numbers, as the client does.
+
 The folders test drives the mounted tab's folders, sorting, row menus, and compact layout, with a stand-in right-click menu whose subscribers answer in either order.
 
 A combined test loads the built Bank Cleaner beside Advanced Bank Search when `BANKCLEANER_DIST` names a built `bankcleaner` folder, to show their module paths, events, globals, and saved data do not collide; without it, that test says it was skipped.
