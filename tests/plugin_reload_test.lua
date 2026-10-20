@@ -66,8 +66,11 @@ h.host.exports.geprices = { isReady = function() return false end, getPrice = fu
 h.host:Notify("geprices", true, true)
 app:SetText("price:[1 TO *]")
 assert(app.priceWait ~= nil and h.bankHost:Listener("advancedbanksearch_price_wait") ~= nil)
+app:QueueText("price:[5 TO *]")
+assert(app.searchWait ~= nil and h.bankHost:Listener("advancedbanksearch_search_wait") ~= nil)
 h.host:Unload("bankcore")
 assert(app.priceWait == nil and h.bankHost:Listener("advancedbanksearch_price_wait") == nil)
+assert(app.searchWait == nil and h.bankHost:Listener("advancedbanksearch_search_wait") == nil)
 h:LoadCore()
 h:OpenBank()
 h:Tick(2)
@@ -95,10 +98,11 @@ h:Tick(2)
 
 -- Unloading mid-wait leaves no tab, listener, or subscription behind
 hot:SetText("price:[3 TO *]")
-assert(hot.priceWait ~= nil)
+hot:QueueText("price:[4 TO *]")
+assert(hot.priceWait ~= nil and hot.searchWait ~= nil)
 assert(h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch/search") ~= nil)
 h.host:Unload("advancedbanksearch")
-assert(not hot:IsConnected() and hot.priceWait == nil)
+assert(not hot:IsConnected() and hot.priceWait == nil and hot.searchWait == nil)
 for _, subscription in ipairs(h.host:SubscriptionsOf("advancedbanksearch")) do
     error("Advanced Bank Search left " .. subscription .. " subscribed")
 end

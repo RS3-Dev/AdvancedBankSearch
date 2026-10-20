@@ -66,8 +66,9 @@ function SearchTab:DestroyControls()
     pcall(function() prettyui.Tooltip.unregisterContext(controls.parent) end)
 end
 
--- Forget the column and stop sorting when Bank Core unmounts it
+-- Forget the column, sorting, and any waiting search on unmount
 function SearchTab:Unmount()
+    self.app:StopSearchWait()
     self:DestroyControls()
     self.ctx = nil
     self.sortMode = false
@@ -113,11 +114,11 @@ function SearchTab:Build()
     end)
     controls.field = prettyui.TextField.new(parent, {
         x = X, y = FIELD_TOP, width = math.max(1, width - SORT_SIZE - SORT_GAP), height = FIELD_HEIGHT,
-        placeholder = "Search items with RuneQL...", text = app.text, maxLength = 9999,
+        placeholder = "Search items with RuneQL...", text = app.draft, maxLength = 9999,
         onChange = function(_, _, content)
             -- Starting a search ends sorting
             if tostring(content or "") ~= "" and self.sortMode then self:SetSortMode(false) end
-            app:SetText(content)
+            app:QueueText(content)
         end,
     })
     owned[#owned + 1] = controls.field

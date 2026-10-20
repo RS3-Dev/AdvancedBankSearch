@@ -20,6 +20,9 @@ local SEARCH_PAGE = "search"
 local QUERY_PAGE = "query"
 local CONTENT_EVENT = "advancedbanksearch_content"
 local PRICE_WAIT_EVENT = "advancedbanksearch_price_wait"
+local SEARCH_WAIT_EVENT = "advancedbanksearch_search_wait"
+-- Quiet logic ticks before typed text searches, 200 ms at 50 a second
+local SEARCH_WAIT_TICKS = 10
 -- Logic ticks between GE Prices checks, and before giving up
 local PRICE_CHECK_TICKS = 30
 local PRICE_WAIT_LIMIT = 1800
@@ -69,6 +72,9 @@ function App.new()
         -- The search text, with a serial so a new search starts at the top
         text = "",
         serial = 0,
+        -- The field's text and its wait to become the search text
+        draft = "",
+        searchWait = nil,
         -- Chosen, shown, and delete-pending queries, plus last match counts
         selectedQuery = nil,
         pageQuery = nil,
@@ -169,9 +175,10 @@ function App:Connect()
     return true
 end
 
--- Drop the handle, menus, price wait, dialogs, and snapshot
+-- Drop the handle, menus, waits, dialogs, and snapshot
 function App:Disconnect()
     self.menus:Stop()
+    self:StopSearchWait()
     self:StopPriceWait()
     self:CloseEditor()
     self:CloseFolderDialog()
@@ -190,6 +197,7 @@ function App:DependencyChanged(name, enabled)
     if name == "runeql" then
         if not enabled and self.shownPage ~= nil and self.handle ~= nil then self.handle:LeavePage() end
         if not enabled then
+            self:StopSearchWait()
             self:ShowStatus(NEEDS_RUNEQL, true)
         elseif self.status == NEEDS_RUNEQL then
             self:ShowStatus(nil)
@@ -205,10 +213,11 @@ function App:DependencyChanged(name, enabled)
     self:Refresh()
 end
 
--- Drop the snapshot, editor, and folder dialog when the bank closes
+-- Drop the snapshot, typed search, and windows when the bank closes
 function App:OnState(state)
     if not state.running or CLOSED[state.reason] then
         self.snapshot = nil
+        self:StopSearchWait()
         self:CloseEditor()
         self:CloseFolderDialog()
     end
@@ -356,7 +365,9 @@ end
 
 -- Show the search page for long enough text, or leave it
 function App:SetText(text)
+    self:StopSearchWait()
     self.text = tostring(text or "")
+    self.draft = self.text
     self.confirmDelete = nil
     if self.handle == nil then return end
     if self:RuneQL() == nil then
@@ -377,10 +388,12 @@ function App:SetText(text)
 end
 
 -- Show a saved query's page, or leave it if already shown
+-- Choosing one drops typed text still waiting to search
 function App:ChooseQuery(queryID)
     self.confirmDelete = nil
     if self.queries:Get(queryID) == nil then return false end
     if self.handle == nil then return false end
+    self:StopSearchWait()
     if self.shownPage == QUERY_PAGE and self.pageQuery == queryID then
         self.selectedQuery = queryID
         self.handle:LeavePage()
@@ -397,6 +410,35 @@ function App:ChooseQuery(queryID)
     local opened = self:ShowPage(QUERY_PAGE)
     self:Refresh()
     return opened
+end
+
+-- Search typed text once typing pauses for SEARCH_WAIT_TICKS
+-- Short text and searches that cannot run apply at once
+function App:QueueText(text)
+    self.draft = tostring(text or "")
+    self.confirmDelete = nil
+    if self.handle == nil or self:RuneQL() == nil or not Ranking.IsSearchable(self.draft) then
+        self:SetText(self.draft)
+        return
+    end
+    if self.searchWait ~= nil then
+        self.searchWait.ticks = 0
+        return
+    end
+    local wait = { ticks = 0 }
+    self.searchWait = wait
+    Event.Logic.Subscribe(SEARCH_WAIT_EVENT, function()
+        if self.searchWait ~= wait then return end
+        wait.ticks = wait.ticks + 1
+        if wait.ticks >= SEARCH_WAIT_TICKS then self:SetText(self.draft) end
+    end)
+end
+
+-- Stop waiting to search typed text
+function App:StopSearchWait()
+    if self.searchWait == nil then return end
+    self.searchWait = nil
+    Event.Logic.Unsubscribe(SEARCH_WAIT_EVENT)
 end
 
 -- Recheck prices every PRICE_CHECK_TICKS ticks, up to the limit
@@ -653,7 +695,7 @@ function App:DestroyPanel()
     if panel ~= nil then pcall(function() panel:Destroy() end) end
 end
 
--- Release the panel, menus, windows, price wait, and registration
+-- Release the panel, menus, windows, waits, and registration
 function App:Shutdown()
     if self.shutDown then return end
     self.shutDown = true

@@ -37,10 +37,15 @@ local function takeUpdates()
 end
 
 -- Type into the search field as the host reports it
-local function type(text)
+local function enter(text)
     controls.field.root.content = text
     controls.field.root.hooks[ui.Hook.ONCONTENTCHANGED](controls.field.root, "change", text)
-    h:Tick(2)
+end
+
+-- Type, then wait out the 10 quiet ticks before searching
+local function type(text)
+    enter(text)
+    h:Tick(12)
 end
 
 -- Press a PrettyUI button
@@ -124,6 +129,89 @@ assert(shown() == "[No items match]" and controls.status.content == "No items ma
 -- Clearing the text returns to the bank's own view
 type("")
 assert(key() == nil and app.shownPage == nil)
+
+-- Typing pauses --------------------------------------------------------------------------
+
+-- Count the texts RuneQL compiles
+local engine = app:RuneQL()
+local compile = engine.Compile
+local compiled = {}
+engine.Compile = function(text, ...)
+    compiled[#compiled + 1] = text
+    return compile(text, ...)
+end
+local function takeCompiled()
+    local texts = table.concat(compiled, " | ")
+    compiled = {}
+    return texts
+end
+local function waiting()
+    return app.searchWait ~= nil and h.bankHost:Listener("advancedbanksearch_search_wait") ~= nil
+end
+
+-- Rapid typing searches once, 10 quiet ticks after the last key
+takeUpdates()
+local field, serial = controls.field, app.serial
+for _, text in ipairs({ "ir", "iro", "iron", "iron b", "iron ba" }) do
+    enter(text)
+    h:Tick(9)
+end
+assert(takeCompiled() == "" and takeUpdates() == 0 and key() == nil and app.text == "" and app.draft == "iron ba")
+assert(waiting() and app.serial == serial)
+enter("iron bar")
+h:Tick(9)
+assert(takeCompiled() == "" and takeUpdates() == 0 and key() == nil)
+h:Tick()
+assert(takeCompiled() == "iron bar" and takeUpdates() == 1 and app.serial == serial + 1)
+assert(key() == "search:" .. app.serial and string.find(shown(), "^101:1%?? 101:2"), shown())
+assert(not waiting() and controls.field == field and field:GetText() == "iron bar")
+h:Tick(20)
+assert(takeCompiled() == "" and takeUpdates() == 0)
+
+-- Bank changes and dependency news while typing rank only the shown search
+enter("lobster")
+host:Rebuild(function(specs)
+    specs[2][2] = 0
+    return specs
+end)
+layout:HandleInventoryUpdate()
+h:Tick(4)
+h.host:Notify("geprices", false, false)
+h:Tick(2)
+local during = takeCompiled()
+assert(string.find(during, "iron bar", 1, true) and not string.find(during, "lobster", 1, true), during)
+assert(app.text == "iron bar" and string.find(shown(), "^101:1%?? 101:2") and waiting(), shown())
+h:Tick(4)
+assert(takeCompiled() == "lobster" and app.text == "lobster" and not waiting())
+h:Tick(2)
+assert(shown() == "105:1", shown())
+
+-- Clearing or short text applies at once and drops the waiting search
+enter("iron ore")
+h:Tick(5)
+enter("")
+h:Tick(2)
+assert(key() == nil and app.text == "" and not waiting())
+type("lobster")
+enter("lobster b")
+h:Tick(3)
+enter("l")
+h:Tick(2)
+assert(key() == nil and app.text == "l" and not waiting())
+h:Tick(20)
+local settled = takeCompiled()
+assert(key() == nil and string.find(settled, "lobster", 1, true) and not string.find(settled, "lobster b", 1, true), settled)
+
+-- A resize keeps the typed text and its wait without searching
+enter("iron ore")
+h:Tick(5)
+app.tab.callbacks.resize()
+controls = app.tab.controls
+assert(controls.field ~= field and controls.field:GetText() == "iron ore" and waiting() and takeCompiled() == "")
+h:Tick(5)
+assert(takeCompiled() == "iron ore" and string.find(key(), "^search:") and controls.field:GetText() == "iron ore")
+type("")
+
 -- Typing updates disabled states only when they change
 local disabledSets = 0
 for _, name in ipairs({ "field", "edit", "delete" }) do
@@ -160,14 +248,21 @@ local editor = app.editor
 assert(editor ~= nil and editor.queryID == nil and shownWindows == 1)
 editor.nameField:SetText("Iron")
 editor.queryField:SetText("iron")
-press(editor.saveButton)
+-- Saving compiles at once, not after a pause
+takeCompiled()
+editor.saveButton.root.hooks[ui.Hook.ONCLICK]()
+assert(app.editor == nil and takeCompiled() == "iron" and not waiting())
+h:Tick(2)
 assert(app.editor == nil and rows() == "Iron" and app.selectedQuery == "1")
 assert(h.databases.advancedbanksearch["advancedbanksearch:queries:v1:manifest"] ~= nil)
 
 -- Choosing it shows its page without placeholders and adds its count
+-- Text still waiting to search is dropped, so it cannot take the page
+enter("lobster")
 assert(controls.list:Click("1"))
-h:Tick(2)
+h:Tick(20)
 assert(key() == "query:1" and service.pages["__bankutils_ext:advancedbanksearch/query"].title == "Iron")
+assert(not waiting() and app.text == "" and controls.field:GetText() == "lobster")
 assert(not string.find(shown(), "?", 1, true) and string.find(shown(), "101:2", 1, true), shown())
 assert(rows() == "Iron (4)", rows())
 -- Choosing it again returns to the bank's own view
@@ -310,9 +405,12 @@ assert(shown() == "[This search needs GE Prices]", shown())
 
 -- RuneQL unloading ----------------------------------------------------------------------
 
--- The page closes and the field is disabled; queries stay but cannot save
+-- The page closes, waiting typed text is dropped, and the field is disabled
+-- Queries stay but cannot save
+enter("lobster")
 h.host:Notify("runeql", false, false)
-h:Tick(2)
+assert(not waiting())
+h:Tick(20)
 assert(key() == nil and app:RuneQL() == nil and controls.field.disabled)
 assert(rows() == "Lobster" and controls.status.content == "Searching needs RuneQL. Enable RuneQL to search your bank.")
 press(controls.new)
@@ -331,12 +429,15 @@ type("lobster")
 assert(shown() == "105:1")
 
 -- Closing the bank leaves the page and closes the editor
+-- Waiting typed text is dropped too
 press(controls.new)
 assert(app.editor ~= nil)
+enter("iron")
+assert(waiting())
 h.bankHost:UnmountBankWindow()
 session.layout:Restore()
-h:Tick(2)
-assert(app.editor == nil and app.shownPage == nil)
+h:Tick(20)
+assert(app.editor == nil and app.shownPage == nil and not waiting())
 
 h.host:Unload("advancedbanksearch")
 h.host:Unload("bankcore")

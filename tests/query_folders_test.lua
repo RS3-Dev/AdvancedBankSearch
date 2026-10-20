@@ -20,10 +20,15 @@ local parent = h:TabParent()
 assert(controls ~= nil and parent ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
 
 -- Type into the search field as the host reports it
-local function type(text)
+local function enter(text)
     controls.field.root.content = text
     controls.field.root.hooks[ui.Hook.ONCONTENTCHANGED](controls.field.root, "change", text)
-    h:Tick(2)
+end
+
+-- Type, then wait out the 10 quiet ticks before searching
+local function type(text)
+    enter(text)
+    h:Tick(12)
 end
 
 -- List the rows as drawn: > marks a folder member, * a selected row
@@ -212,11 +217,13 @@ assert(not tab.sortMode and #tab.arrows == 0 and icon.spriteID == swap.neutral)
 assert(tooltip.label.content == "Sort saved searches and folders" and chevronOf("Smithing (2)").x == -22)
 assert(rows() == "Fish | Smithing (2) | >Ores | >Bars (1)* | Empty (0)", rows())
 
--- Typing a search ends sorting without rebuilding the field
+-- Typing a search ends sorting at once without rebuilding the field
 field = controls.field
 pressSort()
 assert(tab.sortMode and #tab.arrows > 0)
-type("iron")
+enter("iron")
+assert(not tab.sortMode and #tab.arrows == 0 and app.searchWait ~= nil and app.text ~= "iron")
+h:Tick(12)
 assert(not tab.sortMode and #tab.arrows == 0 and icon.spriteID == swap.neutral)
 assert(controls.field == field and not field.root.destroyed and field:GetText() == "iron" and app.text == "iron")
 assert(app.shownPage == "search" and string.find(key(), "^search:"), tostring(key()))
@@ -245,6 +252,14 @@ controls = tab.controls
 assert(not tab.sortMode and controls.sort.icon.spriteID == swap.neutral and #tab.arrows == 0)
 assert(rows() == "Fish | Smithing (2) | >Ores | >Bars (1)* | Empty (0)", rows())
 assert(getmetatable(app.queries).new():Tree()[1].query.name == "Fish")
+-- Unmounting drops a waiting search; remounting keeps the typed text
+enter("iron ore")
+tab.callbacks.unmount()
+assert(app.searchWait == nil and h.bankHost:Listener("advancedbanksearch_search_wait") == nil)
+tab.callbacks.mount(mounted)
+controls = tab.controls
+h:Tick(20)
+assert(controls.field:GetText() == "iron ore" and app.shownPage == nil and app.text == "")
 -- Show Bars and close Smithing before the menu checks
 assert(controls.list:Click("1"))
 assert(controls.list:Click("folder:1"))
