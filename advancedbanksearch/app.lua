@@ -521,7 +521,9 @@ function App:OpenEditor(record)
     editor = QueryEditor.new(parent, {
         record = record,
         blocked = self:RuneQL() == nil and NEEDS_RUNEQL or nil,
-        onSave = function(queryID, name, query) return self:SaveQuery(queryID, name, query) end,
+        onSave = function(queryID, name, query, builder)
+            return self:SaveQuery(queryID, name, query, builder)
+        end,
         onClose = function()
             if self.editor == editor then self.editor = nil end
         end,
@@ -626,13 +628,14 @@ function App:MoveEntry(kind, entryID, offset)
 end
 
 -- Save a query from the editor once RuneQL can read it
+-- Visual conditions are kept only when they give the same text
 -- A saved query is counted again when its page shows
-function App:SaveQuery(queryID, name, query)
+function App:SaveQuery(queryID, name, query, builder)
     local engine = self:RuneQL()
     if engine == nil then return false, NEEDS_RUNEQL end
     local plan, queryReason = engine.Compile(query)
     if plan == nil then return false, tostring(queryReason or "RuneQL could not read this query.") end
-    local saved, record, reason = self.queries:Save(queryID, name, query)
+    local saved, record, reason = self.queries:Save(queryID, name, query, builder)
     if not saved then return false, reason end
     self.counts[record.id] = nil
     self.selectedQuery = record.id

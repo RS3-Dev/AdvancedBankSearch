@@ -3,6 +3,7 @@
 
 local ChunkedStringStore = require("advancedbanksearch/core/chunked_string_store")
 local Json = require("advancedbanksearch/core/json")
+local QueryBuilder = require("advancedbanksearch/search/query_builder")
 
 -- Trim spaces from user text
 local function trim(value)
@@ -23,12 +24,14 @@ local GONE = "That RuneQL query no longer exists."
 local FOLDER_GONE = "That folder no longer exists."
 
 -- Copy the supported fields of a saved query record
+-- builder holds the visual conditions a query was made from, if any
 local function copyRecord(record)
     if type(record) ~= "table" then return nil end
     return {
         id = tostring(record.id or ""),
         name = tostring(record.name or ""),
         query = tostring(record.query or ""),
+        builder = QueryBuilder.Copy(record.builder),
     }
 end
 
@@ -206,10 +209,12 @@ local function loadData()
             and name ~= nil then
             seen[numericID] = true
             largestID = math.max(largestID, numericID)
+            -- Conditions that no longer give the query are dropped
             valid[#valid + 1] = {
                 id = tostring(numericID),
                 name = name,
                 query = query,
+                builder = QueryBuilder.Trusted(record.builder, query),
             }
         end
     end
@@ -282,12 +287,14 @@ function QueryStore:FindName(name, exceptID)
     return nil
 end
 
--- Validate and save a query
+-- Validate and save a query with the conditions it was built from
+-- Conditions that do not give the query are not kept
 -- Edits keep their place; new queries go at the end
-function QueryStore:Save(queryID, name, query)
+function QueryStore:Save(queryID, name, query, builder)
     local reason
     name, query, reason = validate(name, query)
     if name == nil then return false, nil, reason end
+    builder = QueryBuilder.Trusted(builder, query)
     queryID = queryID ~= nil and tostring(queryID) or nil
     if self:FindName(name, queryID) ~= nil then
         return false, nil, "A RuneQL query with that name already exists."
@@ -300,6 +307,7 @@ function QueryStore:Save(queryID, name, query)
             if record.id == queryID then
                 record.name = name
                 record.query = query
+                record.builder = builder
                 savedRecord = record
                 break
             end
@@ -310,6 +318,7 @@ function QueryStore:Save(queryID, name, query)
             id = tostring(nextData.nextId),
             name = name,
             query = query,
+            builder = builder,
         }
         nextData.nextId = nextData.nextId + 1
         nextData.queries[#nextData.queries + 1] = savedRecord

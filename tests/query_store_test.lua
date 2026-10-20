@@ -162,6 +162,62 @@ assert(folderID == "7", folderID)
 publish('{"schemaVersion":1,"nextId":2,"queries":[{"id":"1","name":"Bars","query":"bar"}],"folders":"x","order":{}}')
 assert(tree(QueryStore.new()) == "Bars")
 
+-- Visual conditions -------------------------------------------------------------------
+
+local QueryBuilder = require("advancedbanksearch/search/query_builder")
+
+-- Read the published save back as text
+local function savedText()
+    local generation = string.sub(values["advancedbanksearch:queries:v1:manifest"], 1, 1)
+    return values["advancedbanksearch:queries:v1:" .. generation .. ":1"]
+end
+
+-- A save from before visual conditions writes back the same text
+local legacy = '{"folders":[{"collapsed":false,"id":"1","name":"Metal","queries":["1"]}],"nextFolderId":2,'
+    .. '"nextId":3,"order":[{"id":"1","kind":"folder"},{"id":"2","kind":"query"}],"queries":['
+    .. '{"id":"1","name":"Bars","query":"name:(iron AND bar)"},{"id":"2","name":"Gems","query":"gem~1"}],'
+    .. '"schemaVersion":1}'
+publish(legacy)
+local visual = QueryStore.new()
+assert(visual:Get("1").builder == nil and visual:Get("2").builder == nil)
+assert(visual:Save("2", "Gems", "gem~1") and savedText() == legacy, savedText())
+-- Conditions sent with text they do not give are not kept
+assert(visual:Save("2", "Gems", "gem~1", { match = "all", rules = { { field = "name", operator = "phrase",
+    value = "gem" } } }))
+assert(visual:Get("2").builder == nil and savedText() == legacy)
+
+-- Conditions are saved beside the query they give and read back
+local draft = { match = "any", rules = { { field = "name", operator = "words", value = 'big "bones"', min = "",
+    max = "" }, { field = "price", operator = "between", value = "", min = "1k", max = "2.5k" } } }
+local builtQuery, builtConditions = QueryBuilder.Build(draft)
+assert(builtQuery == '(name:"big" AND name:"\\"bones\\"") OR price:[1000 TO 2500]', builtQuery)
+local savedVisual, visualRecord = visual:Save(nil, "Bones", builtQuery, builtConditions)
+assert(savedVisual and visualRecord.builder.rules[2].max == 2500 and visualRecord.id == "3")
+assert(visual:FolderOf("1") == "1" and tree(visual) == "Metal[Bars] Gems Bones", tree(visual))
+local reread = QueryStore.new():Get(visualRecord.id)
+assert(reread.query == builtQuery and reread.builder.match == "any" and reread.builder.rules[1].value == 'big "bones"')
+assert(QueryBuilder.Build(reread.builder) == builtQuery and reread.builder.rules[2].min == 1000)
+-- Returned records are copies
+reread.builder.rules[1].value = "changed"
+assert(visual:Get(visualRecord.id).builder.rules[1].value == 'big "bones"')
+-- Saving typed text drops the conditions, so they are never trusted for it
+assert(visual:Save(visualRecord.id, "Bones", builtQuery .. " OR bones"))
+assert(visual:Get(visualRecord.id).builder == nil and QueryStore.new():Get(visualRecord.id).builder == nil)
+assert(visual:Save(visualRecord.id, "Bones", builtQuery, builtConditions))
+assert(QueryStore.new():Get(visualRecord.id).builder ~= nil)
+
+-- Conditions that no longer give the saved text load as none, keeping the query
+local text = savedText()
+publish((text:gsub('"max":2500', '"max":2600')))
+local tampered = QueryStore.new():Get(visualRecord.id)
+assert(tampered.query == builtQuery and tampered.builder == nil)
+publish((text:gsub('"match":"any"', '"match":"most"')))
+assert(QueryStore.new():Get(visualRecord.id).builder == nil)
+publish((text:gsub('"rules":%[', '"rules":["junk",')))
+assert(QueryStore.new():Get(visualRecord.id).builder == nil)
+publish((text:gsub('"builder":{', '"builder":7,"x":{')))
+assert(QueryStore.new():Get(visualRecord.id).builder == nil and #QueryStore.new():All() == 3)
+
 -- A save missing a chunk loads empty with an error and is never overwritten
 local broken = values["advancedbanksearch:queries:v1:manifest"]
 local generation = string.sub(broken, 1, 1)
