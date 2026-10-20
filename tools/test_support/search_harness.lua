@@ -109,9 +109,7 @@ function Harness.KeepNamedHooks()
     end
 end
 
--- Give the stand-in controls what PrettyUI's own have
--- SimpleButton lights with SetActive, and combo box IDs must be whole numbers
--- The client's native combo field fails on other IDs
+-- Give the stand-in SimpleButton PrettyUI's SetActive
 function Harness.FollowPrettyUIControls()
     local newButton = prettyui.SimpleButton.new
     prettyui.SimpleButton.new = function(...)
@@ -120,27 +118,112 @@ function Harness.FollowPrettyUIControls()
         function button:SetActive(active) self.active = active == true end
         return button
     end
-    -- Refuse an entry ID that is not a whole number
+end
+
+-- Stand in for the client's native combo field as the live client acts
+-- It lists labels alphabetically and treats every ID as a sorted position
+-- IDs must be whole numbers, or the client fails
+local function newNativeComboField(parent)
+    local field = ui.Layer.new(parent)
+    field.entryText, field.labels = {}, {}
+    field.hasSelection, field.selectedID, field.selectedLabel = false, -1, ""
     local function wholeID(entryID)
-        if math.type(entryID) ~= "integer" then error("combo box entry IDs must be integers", 3) end
+        if math.type(entryID) ~= "integer" then error("combo field entry IDs must be integers", 3) end
     end
-    local newBox = prettyui.ComboBox.new
-    prettyui.ComboBox.new = function(parent, options)
-        for _, entry in ipairs(options.entries or {}) do wholeID(entry.id) end
-        if options.selectedID ~= nil then wholeID(options.selectedID) end
-        local box = newBox(parent, options)
-        local setEntries, select = box.SetEntries, box.Select
-        function box:SetEntries(entries, selectedID)
-            for _, entry in ipairs(entries) do wholeID(entry.id) end
-            if selectedID ~= nil then wholeID(selectedID) end
-            return setEntries(self, entries, selectedID)
-        end
-        function box:Select(entryID, triggerEvents)
+    local function pick(position)
+        if field.labels[position] == nil then return false end
+        field.hasSelection, field.selectedID, field.selectedLabel = true, position, field.labels[position]
+        return true
+    end
+    function field:SetEntries(entriesMap, selectedID)
+        self.labels = {}
+        for label, entryID in pairs(entriesMap) do
             wholeID(entryID)
-            return select(self, entryID, triggerEvents)
+            self.labels[#self.labels + 1] = label
         end
-        return box
+        table.sort(self.labels)
+        return pick(selectedID) or pick(1)
     end
+    function field:Clear() self.labels, self.hasSelection, self.selectedID, self.selectedLabel = {}, false, -1, "" end
+    function field:Add(label, entryID)
+        wholeID(entryID)
+        self.labels[#self.labels + 1] = label
+        table.sort(self.labels)
+        return true
+    end
+    function field:Select(entryID, triggerEvents)
+        wholeID(entryID)
+        if not pick(entryID) then return false end
+        if triggerEvents == true then self.hooks[ui.Hook.ONSELECTIONCHANGED](self, entryID, 1) end
+        return true
+    end
+    -- Choose a label as a player does, reported by its position
+    function field:Click(label)
+        for position, value in ipairs(self.labels) do
+            if value == label then return self:Select(position, true) end
+        end
+        error("no combo entry " .. label)
+    end
+    return field
+end
+
+-- Stand in for PrettyUI's List under its ordered combo box dropdown
+-- Rows stay in the order given, and a click reports the row's own ID
+local function newDropdownList(parent, options)
+    local list = { root = ui.Layer.new(parent), rows = {} }
+    function list:SetEntries(entries)
+        self.rows = {}
+        for _, entry in ipairs(entries) do
+            self.rows[#self.rows + 1] = { id = entry.id, label = entry.label, visible = true }
+        end
+    end
+    local function rowOf(entryID)
+        for _, row in ipairs(list.rows) do
+            if row.id == entryID then return row end
+        end
+    end
+    function list:SetEntryVisible(entryID, visible) rowOf(entryID).visible = visible end
+    function list:SetSelected(entryID, selected)
+        for _, row in ipairs(self.rows) do row.selected = false end
+        rowOf(entryID).selected = selected
+    end
+    function list:SetScrollPosition(value) self.scrollY = value end
+    function list:SetSize(width, height) self.root:SetSize(width, height) end
+    function list:SetDisabled(disabled) self.disabled = disabled end
+    function list:Clear() self.rows = {} end
+    function list:Destroy() self.root:Destroy() end
+    function list:Click(entryID) options._onEntryClick(self, entryID, true) end
+    return list
+end
+
+-- Load PrettyUI's real ComboBox and OrderedComboBox over the stand-in field
+-- Entries with an order field build the ordered box, as in PrettyUI
+function Harness.LoadComboBox(prettyRoot)
+    ui.Hook.ONSELECTIONCHANGED = ui.Hook.ONSELECTIONCHANGED or "selectionchanged"
+    ui.SelectionChangeEvent = { SELECTED = 1 }
+    ui.TextContentVisibilityMode = { VISIBLE = 1 }
+    ui.InputFieldFilterMode = { NONE = 1 }
+    ui.InputFieldKeyHandlingMode = { DEFAULT = 1 }
+    ui.InputFieldActionResult = { CONTENT_CHANGE = 1, SUBMIT = 2, SUBMIT_ON_ESCAPE = 3, SUBMIT_ON_FOCUS_LOSS = 4 }
+    ui.ComboField = { new = newNativeComboField }
+    ui.InputField = { new = function(parent)
+        local input = ui.Layer.new(parent)
+        input.containerSprite, input.content = {}, ""
+        function input:Setup() end
+        return input
+    end }
+    id.StyleSheet.COMBO_DEFAULT, id.StyleSheet.INPUT_DEFAULT = 1, 2
+    id.Font.MUSEO_SANS_15PT_REGULAR = id.Font.MUSEO_SANS_15PT_REGULAR or 1
+    local stubs = {
+        ["src/core/control_palette"] = assert(loadfile(prettyRoot .. "/src/core/control_palette.lua"))(),
+        ["src/core/math"] = assert(loadfile(prettyRoot .. "/src/core/math.lua"))(),
+        ["src/core/wheel"] = { bind = function() end },
+        ["src/tooltip"] = prettyui.Tooltip,
+        ["src/list"] = { new = newDropdownList },
+    }
+    local env = setmetatable({ require = function(name) return assert(stubs[name], name) end }, { __index = _G })
+    stubs["src/ordered_combo_box"] = assert(loadfile(prettyRoot .. "/src/ordered_combo_box.lua", "t", env))()
+    return assert(loadfile(prettyRoot .. "/src/combo_box.lua", "t", env))()
 end
 
 -- Run every subscription a component has for a hook
@@ -186,6 +269,7 @@ function Harness.new(name, options)
     Harness.KeepNamedHooks()
     prettyui.Tooltip = Harness.LoadTooltip(Harness.PrettyUIRoot())
     prettyui.SpriteButton = Harness.LoadSpriteButton(Harness.PrettyUIRoot())
+    prettyui.ComboBox = Harness.LoadComboBox(Harness.PrettyUIRoot())
     local Build = require("tools/build")
     local out = "dist/test/" .. name
     local built = Build.Run({ out = out })

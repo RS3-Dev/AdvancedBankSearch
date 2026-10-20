@@ -34,9 +34,7 @@ local VALUE_WIDTH = 210
 local BOUND_WIDTH = 92
 local REMOVE_X = MARGIN + 504
 local REMOVE_WIDTH = CONTENT_WIDTH - 504
--- Combo box entries need whole-number IDs
-local MATCH_ENTRIES = { { id = 1, label = "all conditions (AND)" }, { id = 2, label = "any condition (OR)" } }
-local MATCH_KEYS = { "all", "any" }
+local MATCH_CHOICES = { { key = "all", label = "all conditions (AND)" }, { key = "any", label = "any condition (OR)" } }
 local HINT = "Names match whole words in any case, so \"bone\" does not find \"bones\". Prices are per item "
     .. "from GE Prices; items without a price never match. Numbers can use k, m, or b, like 1.5m."
 local LEAVE_TEXT = "Visual conditions replace this RuneQL. Press Visual again to use them."
@@ -47,10 +45,12 @@ local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
--- List combo entries with whole-number IDs
+-- List combo entries in their own order, with their index as the ID
+-- The order field makes PrettyUI use its ordered combo box
+-- The native box sorts labels, and some clients read its IDs as sorted positions
 local function entriesOf(choices)
     local entries = {}
-    for index, choice in ipairs(choices) do entries[index] = { id = index, label = choice.label } end
+    for index, choice in ipairs(choices) do entries[index] = { id = index, label = choice.label, order = index } end
     return entries
 end
 
@@ -200,10 +200,10 @@ function QueryEditor:BuildVisual()
         y = PANEL_TOP,
         width = 220,
         height = CONTROL_HEIGHT,
-        entries = MATCH_ENTRIES,
+        entries = entriesOf(MATCH_CHOICES),
         selectedID = self.draft.match == "any" and 2 or 1,
         onChange = function(_, entryID)
-            self.draft.match = MATCH_KEYS[entryID] or "all"
+            self.draft.match = MATCH_CHOICES[entryID] and MATCH_CHOICES[entryID].key or "all"
             self:Changed()
         end,
     }), group)
@@ -438,7 +438,6 @@ end
 
 -- Change a condition's field, starting over when its kind changes
 function QueryEditor:ChooseField(index, entryID)
-    if self.syncing then return end
     local rule, field = self.draft.rules[index], QueryBuilder.FIELDS[entryID]
     if rule == nil or field == nil or field.key == rule.field then return end
     local before = QueryBuilder.FieldOf(rule.field)
@@ -454,7 +453,7 @@ end
 -- Change how a condition compares its value
 function QueryEditor:ChooseOperator(index, entryID)
     local rule = self.draft.rules[index]
-    if self.syncing or rule == nil then return end
+    if rule == nil then return end
     local operator = QueryBuilder.OPERATORS[QueryBuilder.FieldOf(rule.field).kind][entryID]
     if operator == nil or operator.key == rule.operator then return end
     rule.operator = operator.key
@@ -463,11 +462,10 @@ function QueryEditor:ChooseOperator(index, entryID)
 end
 
 -- Show each row's condition, hiding rows without one
--- Combo boxes may report their own changes here, so those are ignored
+-- Ordered combo boxes report only a player's choice, not these
 function QueryEditor:SyncRows()
     local visual = self.mode == "visual"
     local count = #self.draft.rules
-    self.syncing = true
     for index, slot in ipairs(self.slots) do
         local rule = self.draft.rules[index]
         local shown = visual and rule ~= nil
@@ -497,7 +495,6 @@ function QueryEditor:SyncRows()
         setHidden(slot.maxField, not shown or not between)
         setHidden(slot.removeButton, not shown)
     end
-    self.syncing = false
     self.addButton:SetDisabled(count >= QueryBuilder.MAX_RULES)
 end
 

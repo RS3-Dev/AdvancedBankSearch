@@ -21,8 +21,9 @@ local OPERATORS = {
     },
     number = {
         { key = "equals", label = "is" },
-        { key = "atleast", label = "is at least" },
-        { key = "atmost", label = "is at most" },
+        -- Both include the number itself, despite the wording
+        { key = "atleast", label = "is greater than" },
+        { key = "atmost", label = "is less than" },
         { key = "between", label = "is between" },
     },
 }
