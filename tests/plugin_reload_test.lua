@@ -5,28 +5,27 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local Harness = require("tools/test_support/search_harness")
 
-local NOT_CONNECTED = "Advanced Bank Search needs Bank Core. Enable Bank Core to search your bank."
-local CONNECTED = "Advanced Bank Search is in your bank: open the bank and choose the Search tab in the sidebar."
-local REPLACED = "A newer copy of Advanced Bank Search took over; this copy is idle."
-
 local h = Harness.new("plugin_reload")
 local Loader = require("tools/test_support/fake_plugin_host")
 h:NameObjects({ { 101, "Iron bar" }, { 105, "Lobster" } })
 h.bankHost:SetItems({ { 101, 5 }, { 105, 9 } })
 
--- Without Core or RuneQL, nothing is published and the panel says so
+-- Advanced Bank Search has no plugin window entry, so it has no ribbon icon or panel
+local manifest = assert(io.open(h.searchFolder .. "/plugin.json", "rb"))
+assert(string.find(manifest:read("a"), '"hasRibbonIcon": false', 1, true))
+manifest:close()
+
+-- Without Core or RuneQL, nothing is published
 local search = h:LoadSearch()
 local app = h:App()
 assert(app ~= nil and not app:IsConnected() and search.result == nil and app:RuneQL() == nil)
-local panel = h:OpenContentPanel()
-assert(Harness.Find(panel, NOT_CONNECTED) ~= nil)
 for moduleName in pairs(search.env.package.loaded) do
     assert(string.sub(moduleName, 1, 19) == "advancedbanksearch/", moduleName .. " is not this plugin's module")
 end
 -- Saving needs RuneQL and writes to this plugin's own data
 assert(select(2, app:SaveQuery(nil, "Iron", "iron")) == "Searching needs RuneQL. Enable RuneQL to search your bank.")
 
--- Late RuneQL and Core connect, and the panel says where to look
+-- Late RuneQL and Core connect
 h:LoadRuneQL()
 assert(app:RuneQL() ~= nil)
 assert(app:SaveQuery(nil, "Iron", "iron"))
@@ -34,7 +33,9 @@ for key in pairs(h.databases.advancedbanksearch) do assert(string.find(key, "^ad
 assert(next(h.databases.runeql or {}) == nil)
 local core = h:LoadCore()
 assert(app:IsConnected() and app.bank == core.result)
-assert(Harness.Find(panel, CONNECTED) ~= nil)
+for _, subscription in ipairs(h.host:SubscriptionsOf("advancedbanksearch")) do
+    assert(string.sub(subscription, 1, 18) ~= "ContentLayerReady.", subscription .. " is a plugin panel")
+end
 local state = app.handle:GetState()
 assert(table.concat(state.pages, ",") == "query,search" and state.tabs[1] == "search")
 h:OpenBank()
@@ -58,7 +59,7 @@ assert(app:IsConnected() and app.bank == h.host.exports.bankcore and getmetatabl
 
 -- Core unloading mid-wait releases the plugin and ends the wait
 h.host:Unload("bankcore")
-assert(not app:IsConnected() and Harness.Find(panel, NOT_CONNECTED) ~= nil)
+assert(not app:IsConnected())
 h:LoadCore()
 h:OpenBank()
 h:Tick(2)
@@ -122,9 +123,5 @@ local secondApp = rawget(second.env, "__advancedbanksearch_session")
 assert(secondApp:IsConnected() and not firstApp:IsConnected())
 rawget(first.env, "PluginDependencyUpdate")({ pluginIdentifier = "bankcore", enabled = true })
 assert(firstApp.retired and not firstApp:IsConnected() and secondApp:IsConnected())
-local firstPanel = ui.Layer.new(nil)
-firstPanel:SetSize(300, 400)
-firstApp:CreatePanel(firstPanel)
-assert(Harness.Find(firstPanel, REPLACED) ~= nil)
 
 print("plugin_reload_test: ok")

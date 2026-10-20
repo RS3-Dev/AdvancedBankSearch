@@ -18,7 +18,6 @@ local OWNER_LABEL = "Advanced Bank Search"
 local TAB_ID = "search"
 local SEARCH_PAGE = "search"
 local QUERY_PAGE = "query"
-local CONTENT_EVENT = "advancedbanksearch_content"
 local PRICE_WAIT_EVENT = "advancedbanksearch_price_wait"
 local SEARCH_WAIT_EVENT = "advancedbanksearch_search_wait"
 -- Ticks without typing before a search runs, 200 ms at 50 a second
@@ -31,9 +30,6 @@ local PUBLISHED = { bankcore = "__bankcore_api", runeql = "__runeql_api", gepric
 -- Not-ready reasons that mean the bank is not open at all
 local CLOSED = { stale_api = true, not_ready = true, bank_closed = true }
 
-local NOT_CONNECTED = "Advanced Bank Search needs Bank Core. Enable Bank Core to search your bank."
-local CONNECTED = "Advanced Bank Search is in your bank: open the bank and choose the Search tab in the sidebar."
-local REPLACED = "A newer copy of Advanced Bank Search took over; this copy is idle."
 local NEEDS_RUNEQL = "Searching needs RuneQL. Enable RuneQL to search your bank."
 
 -- Page text and status line for each outcome without items
@@ -93,7 +89,6 @@ function App.new()
         statusIsError = false,
         editor = nil,
         folderDialog = nil,
-        panel = nil,
         retired = false,
         started = false,
         shutDown = false,
@@ -118,11 +113,10 @@ function App:Prices()
     return findDependency(geprices, "geprices", "getPrice")
 end
 
--- Subscribe to this plugin's panel and connect to Bank Core if it runs
+-- Connect to Bank Core if it runs
 function App:Start()
     if self.shutDown or self.started then return end
     self.started = true
-    Event.ContentLayerReady.Subscribe(CONTENT_EVENT, function(event) self:CreatePanel(event.component) end)
     self:Connect()
     self.tagSource:Connect()
 end
@@ -171,7 +165,6 @@ function App:Connect()
     end
     self.menus:Start()
     self.tagSource:Update()
-    self:UpdatePanelNotice()
     return true
 end
 
@@ -187,7 +180,6 @@ function App:Disconnect()
     self.snapshot, self.shownPage, self.shownKey, self.outcome, self.published = nil, nil, nil, nil, {}
     if handle ~= nil then pcall(function() handle:Dispose() end) end
     self.tagSource:Update()
-    self:UpdatePanelNotice()
 end
 
 -- Follow a dependency loading or unloading
@@ -658,49 +650,15 @@ function App:ShowStatus(text, isError)
     self.statusIsError = isError == true
 end
 
--- Redraw the tab and the panel notice
+-- Redraw the tab
 function App:Refresh()
     self.tab:Refresh()
-    self:UpdatePanelNotice()
 end
 
--- Say whether the plugin is in the bank, or why not
-function App:PanelNotice()
-    if self:IsConnected() then
-        return CONNECTED .. (self:RuneQL() == nil and (" " .. NEEDS_RUNEQL) or "")
-    end
-    return self.retired and REPLACED or NOT_CONNECTED
-end
-
--- Show the current notice on an open plugin panel
-function App:UpdatePanelNotice()
-    if self.panel ~= nil then self.panel.content = self:PanelNotice() end
-end
-
--- Show the panel notice, connecting first if Bank Core started
-function App:CreatePanel(parent)
-    if self.shutDown then return end
-    self:Connect()
-    self:DestroyPanel()
-    self.panel = prettyui.Text.new(parent, {
-        text = self:PanelNotice(), x = 12, y = 12, width = math.max(1, (parent.width or 300) - 24),
-        height = 80, font = id.Font.MUSEO_SANS_11PT_REGULAR, colour = 0xD7C9ADFF, maxLines = 4,
-    })
-end
-
--- Release the panel's text
-function App:DestroyPanel()
-    local panel = self.panel
-    self.panel = nil
-    if panel ~= nil then pcall(function() panel:Destroy() end) end
-end
-
--- Release the panel, menus, windows, waits, and registration
+-- Release the menus, windows, waits, and registration
 function App:Shutdown()
     if self.shutDown then return end
     self.shutDown = true
-    if self.started then Event.ContentLayerReady.Unsubscribe(CONTENT_EVENT) end
-    pcall(function() self:DestroyPanel() end)
     pcall(function() self:Disconnect() end)
     pcall(function() self.tagSource:Disconnect() end)
 end

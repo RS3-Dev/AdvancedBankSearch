@@ -13,7 +13,7 @@ Everything here is checked against Bank Core's stand-in host and the installed R
 - **Sorting.** As in Bank Tags, the swap button beside the field, a native bank button whose icon lights while hovered or sorting, turns sorting on and off. While sorting, each row has up and down arrows: folders and searches outside folders move among themselves, and searches inside a folder move within it. Folders keep whether they are open and still open and close when clicked, so a closed folder's searches can be reached; clicking a search chooses nothing. Starting a search, or leaving the bank, ends sorting; sorting keeps the search text, since the search does not hide rows. Folders, their order, and whether each is open are saved.
 - **Prices.** A search that uses `price`, `gehigh`, or `gelow` needs GE Prices. Until prices load, its page says it is waiting, and it is ranked once they arrive (checked every 30 ticks, for up to 1,800); it is never ranked on missing prices. Without GE Prices its page says it is needed. Other searches never need GE Prices.
 - **Convert to a tag.** With Bank Tags loaded, its Import window lists "Saved bank search": type a saved search's name and Bank Tags previews a tag holding exactly the stacks the search matches now.
-- **Plugin panel.** Says whether the plugin is in the bank, and whether Bank Core or RuneQL is needed.
+- **No plugin window entry.** Advanced Bank Search has no ribbon icon or panel in the Plugins window; everything it shows is in the bank.
 
 ## Requirements and load order
 

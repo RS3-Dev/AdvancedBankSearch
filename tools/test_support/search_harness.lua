@@ -136,8 +136,8 @@ function Harness.new(name, options)
     -- Item and config names RuneQL ranks by, filled in by tests
     local objects = {}
     config.Obj.FromID = function(objectID) return objects[objectID] end
-    local contentSubscriptions = {}
-    for _, event in ipairs({ "GameStateChanged", "MiniMenuEntrySelected",
+    -- Bank Core still listens for its own plugin panel
+    for _, event in ipairs({ "GameStateChanged", "MiniMenuEntrySelected", "ContentLayerReady",
         "InventoryAdded", "InventoryRemoved", "InventoryUpdated" }) do
         Event[event] = { Subscribe = function() end, Unsubscribe = function() end }
     end
@@ -151,10 +151,6 @@ function Harness.new(name, options)
     Harness.KeepNamedHooks()
     prettyui.Tooltip = Harness.LoadTooltip(Harness.PrettyUIRoot())
     prettyui.SpriteButton = Harness.LoadSpriteButton(Harness.PrettyUIRoot())
-    Event.ContentLayerReady = {
-        Subscribe = function(key, action) contentSubscriptions[key] = action end,
-        Unsubscribe = function(key) contentSubscriptions[key] = nil end,
-    }
     local Build = require("tools/build")
     local out = "dist/test/" .. name
     local built = Build.Run({ out = out })
@@ -175,7 +171,6 @@ function Harness.new(name, options)
         objects = objects,
         databases = databases,
         logged = logged,
-        contentSubscriptions = contentSubscriptions,
         menuSubscriptions = menuSubscriptions,
         coreRoot = coreRoot,
         out = out,
@@ -255,14 +250,6 @@ end
 -- Run logic ticks
 function Harness:Tick(count)
     for _ = 1, count or 1 do self.bankHost:Tick() end
-end
-
--- Show the plugin's content panel as its ribbon icon does
-function Harness:OpenContentPanel(event)
-    local panel = ui.Layer.new(nil)
-    panel:SetSize(300, 400)
-    self.contentSubscriptions[event or "advancedbanksearch_content"]({ component = panel })
-    return panel
 end
 
 -- Build a menu over mounted content and let each plugin answer
