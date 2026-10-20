@@ -161,7 +161,7 @@ function Harness.new(name, options)
     local Loader = require("tools/test_support/fake_plugin_host")
     local logged = {}
     local globals = { ui = ui, id = id, Event = Event, config = config, Vector4 = Vector4,
-        Mouse = Mouse, MiniMenuActionType = MiniMenuActionType,
+        Mouse = Mouse, MiniMenuActionType = MiniMenuActionType, MiniMenuEntryType = MiniMenuEntryType,
         Player = { IsAvailable = function() return true end }, GameState = { GAME = 30 },
         -- Keep each log line so tests can see failed mounts
         log = function(...) logged[#logged + 1] = table.concat({ ... }) end }
