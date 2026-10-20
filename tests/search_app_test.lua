@@ -168,7 +168,7 @@ assert(not waiting() and controls.field == field and field:GetText() == "iron ba
 h:Tick(20)
 assert(takeCompiled() == "" and takeUpdates() == 0)
 
--- Bank changes and dependency news while typing rank only the shown search
+-- Bank changes and dependency changes while typing rank only the shown search
 enter("lobster")
 host:Rebuild(function(specs)
     specs[2][2] = 0

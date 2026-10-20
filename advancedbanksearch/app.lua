@@ -21,14 +21,14 @@ local QUERY_PAGE = "query"
 local CONTENT_EVENT = "advancedbanksearch_content"
 local PRICE_WAIT_EVENT = "advancedbanksearch_price_wait"
 local SEARCH_WAIT_EVENT = "advancedbanksearch_search_wait"
--- Quiet logic ticks before typed text searches, 200 ms at 50 a second
+-- Ticks without typing before a search runs, 200 ms at 50 a second
 local SEARCH_WAIT_TICKS = 10
 -- Logic ticks between GE Prices checks, and before giving up
 local PRICE_CHECK_TICKS = 30
 local PRICE_WAIT_LIMIT = 1800
 -- Where each dependency publishes its API if not injected
 local PUBLISHED = { bankcore = "__bankcore_api", runeql = "__runeql_api", geprices = "__geprices_api" }
--- Readiness reasons that mean the bank is not open at all
+-- Not-ready reasons that mean the bank is not open at all
 local CLOSED = { stale_api = true, not_ready = true, bank_closed = true }
 
 local NOT_CONNECTED = "Advanced Bank Search needs Bank Core. Enable Bank Core to search your bank."
@@ -49,7 +49,7 @@ local OUTCOMES = {
 
 -- Find a dependency's API that offers the called function
 local function findDependency(injected, name, method)
-    -- Either may be nil, which would stop ipairs early
+    -- Either may be nil, so loop by index instead of ipairs
     local candidates = { injected, rawget(_G, PUBLISHED[name]) }
     for index = 1, 2 do
         local candidate = candidates[index]
@@ -63,16 +63,16 @@ function App.new()
     local app = setmetatable({
         queries = QueryStore.new(),
         -- Whether each optional dependency was last reported loaded
-        -- An unloaded plugin's globals can outlive it
+        -- A plugin's globals can stick around after it unloads
         enabled = { runeql = true, geprices = true, banktags = true },
         bank = nil,
         handle = nil,
-        -- The last bank snapshot read, kept while Bank Core is still building
+        -- The last bank read, kept while Bank Core is still building
         snapshot = nil,
-        -- The search text, with a serial so a new search starts at the top
+        -- The search text, with a counter so a new search starts at the top
         text = "",
         serial = 0,
-        -- The field's text and its wait to become the search text
+        -- The field's text and the wait before it becomes the search text
         draft = "",
         searchWait = nil,
         -- Chosen, shown, and delete-pending queries, plus last match counts
@@ -80,11 +80,11 @@ function App.new()
         pageQuery = nil,
         confirmDelete = nil,
         counts = {},
-        -- The shown page and key, and each page's last sent signature
+        -- The shown page and key, and a summary of each page's last sent layout
         shownPage = nil,
         shownKey = nil,
         published = {},
-        -- The shown outcome, its price wait, and the key that gave up
+        -- The shown outcome, its price wait, and the page key that gave up waiting
         -- A failed key stays failed until GE Prices or the key changes
         outcome = nil,
         priceWait = nil,
@@ -175,7 +175,7 @@ function App:Connect()
     return true
 end
 
--- Drop the handle, menus, waits, dialogs, and snapshot
+-- Drop the handle, menus, waits, dialogs, and last bank read
 function App:Disconnect()
     self.menus:Stop()
     self:StopSearchWait()
@@ -213,7 +213,7 @@ function App:DependencyChanged(name, enabled)
     self:Refresh()
 end
 
--- Drop the snapshot, typed search, and windows when the bank closes
+-- Drop the last bank read, typed search, and windows when the bank closes
 function App:OnState(state)
     if not state.running or CLOSED[state.reason] then
         self.snapshot = nil
@@ -237,7 +237,7 @@ function App:OnBankItems()
     self:RefreshPage()
 end
 
--- Read the bank, keeping the snapshot while Core builds
+-- Read the bank, keeping the last items while Core builds
 function App:ReadBank()
     if self.handle == nil then return nil end
     local snapshot, reason = self.handle:GetBankItems()
@@ -249,7 +249,7 @@ function App:ReadBank()
     return self.snapshot
 end
 
--- Rank text over the bank into an outcome
+-- Search the bank with text and rank the result
 function App:Run(text, excludePlaceholders)
     local engine = self:RuneQL()
     if engine == nil then return { state = "needs_runeql" } end
@@ -332,7 +332,7 @@ function App:PutPage(pageID)
     return true, page.key
 end
 
--- Show a page through the tab, or the handle when unmounted
+-- Show a page through the tab, or through Core when the tab isn't shown
 -- Going through the tab shows Core's View All guidance on refusal
 function App:ShowPage(pageID)
     local ok, key = self:PutPage(pageID)
@@ -413,7 +413,7 @@ function App:ChooseQuery(queryID)
 end
 
 -- Search typed text once typing pauses for SEARCH_WAIT_TICKS
--- Short text and searches that cannot run apply at once
+-- Short text and searches that can't run take effect at once
 function App:QueueText(text)
     self.draft = tostring(text or "")
     self.confirmDelete = nil

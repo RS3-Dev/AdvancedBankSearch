@@ -173,7 +173,7 @@ local function detach(data, queryID)
     return #data.order + 1
 end
 
--- Report whether a save was published
+-- Report whether a save exists
 local function hasSave()
     if PersistentDB == nil or PersistentDB.GetString == nil then return false end
     local ok, value = pcall(function() return PersistentDB:GetString(TEXT_STORE.manifestKey) end)
@@ -242,7 +242,7 @@ function QueryStore:Persist(data)
     return true, nil
 end
 
--- Normalize and save data, adopting it only once saved
+-- Tidy and save data, using it only once the save works
 function QueryStore:Commit(nextData)
     normalize(nextData)
     local persisted, reason = self:Persist(nextData)

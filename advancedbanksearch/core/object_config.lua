@@ -1,4 +1,4 @@
--- Read the durable config name RuneQL identifies an object by
+-- Read the lasting config name RuneQL uses to identify an object
 
 local ObjectConfig = {}
 

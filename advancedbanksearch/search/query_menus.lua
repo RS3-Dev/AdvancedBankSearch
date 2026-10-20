@@ -1,5 +1,5 @@
 -- Add folder and saved-search entries to the Search tab's row menus
--- Clients place new entries unpredictably, so each is found then moved low
+-- The client places new entries unpredictably, so each is found and moved down
 -- A chosen entry runs next tick, only if its column and row still exist
 
 local QueryMenus = {}
@@ -102,7 +102,7 @@ local function addLow(menu, entries)
     if now == nil or signature(now) ~= topSignature then promoteCancel(menu) end
 end
 
--- Run an action next tick if current() still holds
+-- Run an action next tick if current() still returns true
 function QueryMenus:Defer(current, action)
     return function()
         if not current() then return end
@@ -118,7 +118,7 @@ function QueryMenus:Defer(current, action)
     end
 end
 
--- Measure the pointer in the scaled interface's coordinates
+-- Get the pointer position in the scaled interface
 local function pointer()
     if Mouse == nil or Mouse.GetPosition == nil then return nil, nil end
     local position = Mouse.GetPosition()

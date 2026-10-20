@@ -75,12 +75,12 @@ assert(listed(search("qty:[6 TO *]").matches) == "105:1")
 local invalid = search("name:(iron")
 assert(invalid.state == "invalid" and #invalid.reason > 0, invalid.reason)
 
--- RuneQL matches nothing for a missing field, but a negated range matches it
+-- RuneQL matches nothing for a missing field, but "not" a range does match it
 -- So an unpriced ranking would be wrong, not empty
 local plan = runeql.Compile("iron AND NOT price:[1 TO 100]")
 assert(plan ~= nil and plan:Score({ name = "Iron bar", fields = {} }) ~= nil)
 assert(plan:Score({ name = "Iron bar", fields = { price = 50 } }) == nil)
--- A lone negated clause matches nothing, as in Lucene
+-- A query that is only a "not" matches nothing, as in Lucene
 assert(runeql.Compile("NOT price:[1 TO *]"):Score({ name = "Iron bar", fields = {} }) == nil)
 assert(runeql.Compile("price:[1 TO *]"):Score({ name = "Iron bar", fields = {} }) == nil)
 -- Requirements name fields in lower case

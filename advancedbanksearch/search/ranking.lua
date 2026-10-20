@@ -1,5 +1,5 @@
 -- Rank bank stacks against RuneQL text by score, then View All order
--- Price queries wait for prices, since negated missing fields match everything
+-- Price queries wait for prices, since "not" on a missing field matches everything
 
 local ItemFields = require("advancedbanksearch/search/item_fields")
 

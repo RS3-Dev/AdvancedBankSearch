@@ -1,5 +1,5 @@
 -- Offer saved queries as drafts in Bank Tags' Import window
--- Matches must be copies 1 to k of each object, since Tags numbers copies in order
+-- Each object's matches must be copies 1, 2, 3 and so on, since Tags numbers copies in order
 
 local Ranking = require("advancedbanksearch/search/ranking")
 
@@ -31,7 +31,7 @@ end
 
 -- Find Bank Tags' API, injected first, then published
 local function findTags()
-    -- Either may be nil, which would stop ipairs early
+    -- Either may be nil, so loop by index instead of ipairs
     local candidates = { banktags, rawget(_G, API_KEY) }
     for index = 1, 2 do
         local candidate = candidates[index]
@@ -95,7 +95,7 @@ function TagSource:Update()
     self.handle:UpdateImportProvider(PROVIDER_ID, self:Provider())
 end
 
--- Find the first object whose matches are not copies 1 to k
+-- Find the first object whose matches skip a copy number
 local function inexactObject(matches)
     local copies = {}
     for _, match in ipairs(matches) do

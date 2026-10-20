@@ -26,7 +26,7 @@ local function positive(value)
     return value ~= nil and value > 0 and value or nil
 end
 
--- Build query records, caching prices for one execution
+-- Build query records, caching prices for one run
 function QueryItemFields.Enricher(plan, service)
     local needsPrices = QueryItemFields.NeedsPrices(plan)
     local ready = needsPrices and QueryItemFields.IsReady(service)
