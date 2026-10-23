@@ -325,7 +325,7 @@ function App:PutPage(pageID)
 end
 
 -- Show a page through the tab, or through Core when the tab isn't shown
--- Going through the tab shows Core's View All guidance on refusal
+-- This plugin supplies guidance when Core refuses the view
 function App:ShowPage(pageID)
     local ok, key = self:PutPage(pageID)
     if not ok then return false end
@@ -335,6 +335,13 @@ function App:ShowPage(pageID)
         opened, reason = ctx:OpenPage(pageID)
     else
         opened, reason = self.handle:OpenPage(pageID)
+    end
+    if not opened then
+        if reason == "not_all_items" then
+            self.handle:ShowWarning('Select "All Items" to view these search results.')
+        elseif reason == "preset_open" then
+            self.handle:ShowWarning('Close the preset selector to view these search results.')
+        end
     end
     if opened then
         self.shownPage, self.shownKey = pageID, key
