@@ -227,6 +227,7 @@ local FRAME_EDGES = {
     { 0, 0, 0, 1, 0, 1.0 }, { 0, ROW_HEIGHT - 1, 0, 1, 0, 1.0 },
     { 0, 0, 1, ROW_HEIGHT, 0, 0 }, { -1, 0, 1, ROW_HEIGHT, 1.0, 0 },
 }
+-- Outline the selected search without taking its input
 local function addSelectedFrame(root)
     for _, edge in ipairs(FRAME_EDGES) do
         local rectangle = ui.Rectangle.new(root)

@@ -131,6 +131,7 @@ local function buildRule(rule, position)
         if operator.key ~= "atmost" then lower = number end
         if operator.key ~= "atleast" then upper = number end
     end
+    -- RuneQL uses an asterisk for an unbounded range endpoint
     local function bound(number) return number ~= nil and string.format("%d", number) or "*" end
     return field.key .. ":[" .. bound(lower) .. " TO " .. bound(upper) .. "]", saved
 end
