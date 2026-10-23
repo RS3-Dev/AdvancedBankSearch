@@ -75,7 +75,7 @@ end
 
 -- The shown page's key, or nil in the bank's own view
 local function key()
-    return layout.selectedTag ~= nil and layout.pageState.view.key or nil
+    return layout.selection ~= nil and layout.pageState.view.key or nil
 end
 
 -- List the saved query rows as drawn

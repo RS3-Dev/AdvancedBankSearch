@@ -54,7 +54,7 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     for index, tab in ipairs(layout.extensionTabs) do ids[index] = tab.id end
     assert(table.concat(ids, " ") == "__bankutils_ext_tab:advancedbanksearch/search __bankutils_ext_tab:bankcleaner/cleanup",
         table.concat(ids, " "))
-    assert(#cleanerApp.handle:GetState().pages == 13 and #searchApp.handle:GetState().pages == 2)
+    assert(#cleanerApp.handle:GetState().pages == 1 and #searchApp.handle:GetState().pages == 2)
 
     -- Each plugin's pages work from its own tab
     h:ChooseTab("advancedbanksearch", "search")
@@ -70,7 +70,7 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     -- Bank Cleaner's row list opens a category page
     assert(cleanerApp.sidebar ~= nil and cleanerApp.sidebar.list:Click("metal_bank"))
     h:Tick(2)
-    assert(layout.pageState.view.key == "cleanup:metal_bank" and cleanerApp.shownPage == "metal_bank")
+    assert(layout.pageState.view.key == "cleanup:metal_bank" and cleanerApp.shownCategory == "metal_bank")
     checkSeparate(h, cleaner, search)
 
     -- Reloading this plugin leaves Bank Cleaner's tab and page
