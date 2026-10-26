@@ -59,7 +59,6 @@ end
 -- Load PrettyUI's real SpriteButton over the stand-in components
 function Harness.LoadSpriteButton(prettyRoot)
     config.Cursor = { CURSOR_BLANK = 1, CURSOR_INFO = 2 }
-    ui.Interfaces.GetInterface = function() return {} end
     local stubs = {
         ["src/core/sprites"] = { SPRITE_BUTTONS = prettyui.Sprites.SPRITE_BUTTONS },
         ["src/tooltip"] = prettyui.Tooltip,
