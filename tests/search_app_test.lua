@@ -18,7 +18,7 @@ h:LoadSearch()
 local app = h:App()
 assert(app:IsConnected() and app:RuneQL() ~= nil and app:Prices() == nil)
 local session, layout = h:OpenBank()
-local service = session.extensionPages
+local service = session.pluginPages
 h:Tick(2)
 local controls = app.tab.controls
 assert(controls ~= nil and h:TabParent() ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
@@ -60,7 +60,7 @@ local function shown()
     for _, heading in ipairs(layout.pageState:GetLayoutSections()) do
         entries[#entries + 1] = { y = heading.y, x = -1, text = "[" .. heading.label .. "]" }
     end
-    for _, entry in ipairs(layout:VisibleMirrorEntries()) do
+    for _, entry in ipairs(layout:BuildPageItems()) do
         entries[#entries + 1] = { y = entry.y, x = entry.x,
             text = string.gsub(entry.layoutKey, "^object:", "") .. (entry.placeholder and "?" or "") }
     end
