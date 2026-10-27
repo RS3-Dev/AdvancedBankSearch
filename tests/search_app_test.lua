@@ -23,12 +23,12 @@ h:Tick(2)
 local controls = app.tab.controls
 assert(controls ~= nil and h:TabParent() ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
 
--- Count the pages sent to Bank Core
+-- Count the pages this plugin gives Bank Core
 local updates = 0
-local updatePage = service.UpdatePage
-service.UpdatePage = function(pages, owner, pageID, page)
-    updates = updates + 1
-    return updatePage(pages, owner, pageID, page)
+local createPage = service.CreatePage
+service.CreatePage = function(pages, owner, page)
+    if owner.id == "advancedbanksearch" then updates = updates + 1 end
+    return createPage(pages, owner, page)
 end
 local function takeUpdates()
     local count = updates
@@ -75,7 +75,7 @@ end
 
 -- The shown page's key, or nil in the bank's own view
 local function key()
-    return layout.selection ~= nil and layout.pageState.view.key or nil
+    return layout.shownPage ~= nil and layout.shownPage.key or nil
 end
 
 -- List the saved query rows as drawn
@@ -93,7 +93,7 @@ type("i")
 assert(key() == nil and app.shownPage == nil)
 type("iron")
 assert(key() == "search:1" and app.shownPage == "search", tostring(key()))
-assert(service.pages["__bankutils_ext:advancedbanksearch/search"].title == "Search")
+assert(layout.shownPage.title == "Search")
 -- Every iron stack, placeholder included, and never the lobster
 local first = shown()
 assert(string.find(first, "103:1?", 1, true) and string.find(first, "101:2", 1, true) and not string.find(first, "105"), first)
@@ -264,7 +264,7 @@ assert(h.databases.advancedbanksearch["advancedbanksearch:queries:v1:manifest"] 
 enter("lobster")
 assert(controls.list:Click("1"))
 h:Tick(20)
-assert(key() == "query:1" and service.pages["__bankutils_ext:advancedbanksearch/query"].title == "Iron")
+assert(key() == "query:1" and layout.shownPage.title == "Iron")
 assert(not waiting() and app.text == "" and controls.field:GetText() == "lobster")
 assert(not string.find(shown(), "?", 1, true) and string.find(shown(), "101:2", 1, true), shown())
 assert(rows() == "Iron (4)", rows())
@@ -281,7 +281,7 @@ app.editor.nameField:SetText("Bars")
 app.editor.queryField:SetText('name:"iron bar"')
 press(app.editor.saveButton)
 h:Tick(2)
-assert(service.pages["__bankutils_ext:advancedbanksearch/query"].title == "Bars" and key() == "query:1")
+assert(layout.shownPage.title == "Bars" and key() == "query:1")
 assert(shown() == "101:1 101:2" and rows() == "Bars (2)", shown())
 
 -- A refused save shows in the editor and changes nothing
@@ -392,6 +392,20 @@ assert(app.priceWait == nil and key() ~= waitKey and shown() == "105:1", shown()
 ready = true
 for _ = 1, 60 do h:Tick() end
 assert(shown() == "105:1")
+
+-- Prices that arrive after the player picks a native tab show nothing, even a bank change
+-- heard before the page's notice; the bank keeps its own view
+ready = false
+type("price:[3 TO *]")
+assert(app.priceWait ~= nil and app.shownPage == "search")
+takeUpdates()
+layout:SetNativeViewAll(false)
+app:OnBankItems()
+assert(layout.shownPage == nil and takeUpdates() == 0)
+ready = true
+for _ = 1, 60 do h:Tick() end
+assert(layout.shownPage == nil and app.shownPage == nil and app.priceWait == nil and takeUpdates() == 0)
+layout:SetNativeViewAll(true)
 
 -- A wait gives up after 1,800 ticks; the query is kept
 ready = false

@@ -55,7 +55,7 @@ With Bank Tags enabled, open its **Import/Share** window, choose **Saved bank se
 ## If something is missing
 
 - **Search field or Save disabled:** enable RuneQL.
-- **No Search tab:** check Bank Core and PrettyUI.
+- **No Search tab:** check Bank Core and PrettyUI. If the client log says Advanced Bank Search needs a newer Bank Core, update Bank Core.
 - **Price search waiting:** check GE Prices and allow its data to load.
 - **Page refuses to open:** switch to the bank's native All Items tab.
 - **Old saved searches missing:** the older integrated Bank Utilities plugin uses separate saved data. Copy its query text into a new search here; migration is not automatic.

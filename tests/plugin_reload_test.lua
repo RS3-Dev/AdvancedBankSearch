@@ -37,7 +37,7 @@ for _, subscription in ipairs(h.host:SubscriptionsOf("advancedbanksearch")) do
     assert(string.sub(subscription, 1, 18) ~= "ContentLayerReady.", subscription .. " is a plugin panel")
 end
 local state = app.handle:GetState()
-assert(table.concat(state.pages, ",") == "query,search" and state.tabs[1] == "search")
+assert(not state.pageVisible and state.tabs[1] == "search")
 h:OpenBank()
 h:Tick(2)
 assert(app.tab.controls ~= nil and app:ChooseQuery("1"))

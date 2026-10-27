@@ -51,7 +51,7 @@ end
 
 -- The shown page's key, or nil in the bank's own view
 local function key()
-    return layout.selection ~= nil and layout.pageState.view.key or nil
+    return layout.shownPage ~= nil and layout.shownPage.key or nil
 end
 
 -- Compact layout ------------------------------------------------------------------------

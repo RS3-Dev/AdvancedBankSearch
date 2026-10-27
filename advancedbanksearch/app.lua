@@ -29,8 +29,11 @@ local PRICE_WAIT_LIMIT = 1800
 local PUBLISHED = { bankcore = "__bankcore_api", runeql = "__runeql_api", geprices = "__geprices_api" }
 -- Not-ready reasons that mean the bank is not open at all
 local CLOSED = { stale_api = true, not_ready = true, bank_closed = true }
+-- Reasons Bank Core gives for a page it cannot show, rather than for the bank's view
+local PAGE_REFUSALS = { invalid_page = true, unknown_item = true, duplicate_slot = true, too_large = true }
 
 local NEEDS_RUNEQL = "Searching needs RuneQL. Enable RuneQL to search your bank."
+local NEEDS_NEWER_CORE = "Advanced Bank Search needs a newer Bank Core. Update Bank Core to search your bank."
 
 -- Page text and status line for each outcome without items
 local OUTCOMES = {
@@ -76,10 +79,10 @@ function App.new()
         pageQuery = nil,
         confirmDelete = nil,
         counts = {},
-        -- The shown page and key, and a summary of each page's last sent layout
+        -- The shown page and key, and a summary of the page last shown
         shownPage = nil,
         shownKey = nil,
-        published = {},
+        published = nil,
         -- The shown outcome, its price wait, and the page key that gave up waiting
         -- A failed key stays failed until GE Prices or the key changes
         outcome = nil,
@@ -126,7 +129,7 @@ function App:IsConnected()
     return self.handle ~= nil and self.handle:GetState().live == true
 end
 
--- Register the Search tab, its two pages, and the listener
+-- Register the Search tab and the listener
 function App:Connect()
     if self.shutDown then return false, "stopped" end
     if self:IsConnected() then return true end
@@ -141,21 +144,19 @@ function App:Connect()
     if api == nil or not api.GetState().running then return false, "unavailable" end
     local handle, reason = api.RegisterExtension(OWNER_ID, OWNER_LABEL)
     if handle == nil then return false, reason end
+    -- An older Bank Core shows pages another way, so it needs updating first
+    if type(handle.CreatePage) ~= "function" then
+        handle:Dispose()
+        log(NEEDS_NEWER_CORE)
+        return false, "bankcore_outdated"
+    end
     self.bank, self.handle = api, handle
-    local ok, failure = true, nil
-    for _, pageID in ipairs({ SEARCH_PAGE, QUERY_PAGE }) do
-        if ok then
-            ok, failure = handle:RegisterPage(pageID, { title = "Search", layout = { { label = "No search yet" } } })
-        end
-    end
-    if ok then
-        ok, failure = handle:RegisterTab(TAB_ID, { label = "Search", icon = "SEARCH",
-            tooltip = "Search your bank with RuneQL", mount = self.tab.callbacks })
-    end
+    local ok, failure = handle:RegisterTab(TAB_ID, { label = "Search", icon = "SEARCH",
+        tooltip = "Search your bank with RuneQL", mount = self.tab.callbacks })
     if ok then
         ok, failure = handle:SetListener({
             onState = function(state) self:OnState(state) end,
-            onPage = function(pageID, key) self:OnPage(pageID, key) end,
+            onPage = function(visible, key) self:OnPage(visible, key) end,
             onBankItems = function() self:OnBankItems() end,
         })
     end
@@ -177,7 +178,7 @@ function App:Disconnect()
     self:CloseFolderDialog()
     local handle = self.handle
     self.handle, self.bank = nil, nil
-    self.snapshot, self.shownPage, self.shownKey, self.outcome, self.published = nil, nil, nil, nil, {}
+    self.snapshot, self.shownPage, self.shownKey, self.outcome, self.published = nil, nil, nil, nil, nil
     if handle ~= nil then pcall(function() handle:Dispose() end) end
     self.tagSource:Update()
 end
@@ -215,11 +216,20 @@ function App:OnState(state)
     end
 end
 
+-- Name the page a key shows: free search or a saved query
+local function pageOfKey(key)
+    if type(key) ~= "string" then return nil end
+    if string.sub(key, 1, 7) == "search:" then return SEARCH_PAGE end
+    if string.sub(key, 1, 6) == "query:" then return QUERY_PAGE end
+    return nil
+end
+
 -- Track the shown page; leaving a page ends its price wait
-function App:OnPage(pageID, key)
-    self.shownPage, self.shownKey = pageID, key
-    if self.priceWait ~= nil and self.priceWait.key ~= key then self:StopPriceWait() end
-    if pageID == nil then self.outcome = nil end
+function App:OnPage(visible, key)
+    self.shownKey = visible and key or nil
+    self.shownPage = pageOfKey(self.shownKey)
+    if self.priceWait ~= nil and self.priceWait.key ~= self.shownKey then self:StopPriceWait() end
+    if self.shownPage == nil then self.outcome = nil end
     self:Refresh()
 end
 
@@ -296,69 +306,77 @@ function App:BuildPage(pageID)
     return { title = record.name, key = "query:" .. record.id, layout = layoutFor(outcome) }, outcome
 end
 
--- Send a changed page to Bank Core and show its status
--- Wait for GE prices when the outcome needs them
-function App:PutPage(pageID)
+-- Describe a page and its outcome, saying the prices failed once their wait gave up
+function App:PreparePage(pageID)
     local page, outcome = self:BuildPage(pageID)
-    if page == nil then return false, "unknown_query" end
+    if page == nil then return nil end
     if outcome.state == "prices_loading" and self.pricesFailed == page.key then
         outcome = { state = "prices_failed" }
         page.layout = layoutFor(outcome)
     end
     self.outcome = outcome
-    local text = signature(page)
-    if self.published[pageID] ~= text then
-        local ok, reason = self.handle:UpdatePage(pageID, page)
-        if not ok then
-            self:ShowStatus("Bank Core refused the page (" .. tostring(reason) .. ").", true)
-            return false, reason
-        end
-        self.published[pageID] = text
-    end
+    return page, outcome
+end
+
+-- Show a shown page's status, waiting for GE prices when its outcome needs them
+function App:FollowOutcome(page, outcome, pageID)
     self:ShowOutcome(outcome)
     if outcome.state == "prices_loading" then
         self:StartPriceWait(page.key, pageID)
     elseif self.priceWait ~= nil and self.priceWait.key == page.key then
         self:StopPriceWait()
     end
-    return true, page.key
 end
 
 -- Show a page through the tab, or through Core when the tab isn't shown
 -- This plugin supplies guidance when Core refuses the view
 function App:ShowPage(pageID)
-    local ok, key = self:PutPage(pageID)
-    if not ok then return false end
+    local page, outcome = self:PreparePage(pageID)
+    if page == nil then return false end
     local ctx = self.tab.ctx
-    local opened, reason
+    local shown, reason
     if ctx ~= nil then
-        opened, reason = ctx:OpenPage(pageID)
+        shown, reason = ctx:CreatePage(page)
     else
-        opened, reason = self.handle:OpenPage(pageID)
+        shown, reason = self.handle:CreatePage(page)
     end
-    if not opened then
+    if shown then
+        self.published, self.shownPage, self.shownKey = signature(page), pageID, page.key
+        self:FollowOutcome(page, outcome, pageID)
+    elseif PAGE_REFUSALS[reason] then
+        self:ShowStatus("Bank Core refused the page (" .. tostring(reason) .. ").", true)
+    else
         if reason == "not_all_items" then
             self.handle:ShowWarning('Select "All Items" to view these search results.')
         elseif reason == "preset_open" then
             self.handle:ShowWarning('Close the preset selector to view these search results.')
         end
-    end
-    if opened then
-        self.shownPage, self.shownKey = pageID, key
-    else
         self:ShowStatus("The bank cannot show results now (" .. tostring(reason) .. ").", true)
     end
-    return opened, reason
+    return shown, reason
 end
 
--- Rank the shown page again after a change
+-- Rank the shown page again after a change, drawing it only if it changed
+-- Bank Core is asked first, since another plugin or the native view may have taken the bank
+-- since the last notice; a late price or bank change then shows nothing
 function App:RefreshPage()
-    if self.handle == nil or self.shownPage == nil then return end
+    if self.handle == nil or self.shownPage == nil or not self.handle:GetState().pageVisible then return end
     if self.shownPage == QUERY_PAGE and self.queries:Get(self.pageQuery) == nil then
         self.handle:LeavePage()
         return
     end
-    self:PutPage(self.shownPage)
+    local page, outcome = self:PreparePage(self.shownPage)
+    local text = signature(page)
+    if self.published ~= text then
+        local ok, reason = self.handle:CreatePage(page)
+        if not ok then
+            self:ShowStatus("Bank Core refused the page (" .. tostring(reason) .. ").", true)
+            self:Refresh()
+            return
+        end
+        self.published = text
+    end
+    self:FollowOutcome(page, outcome, self.shownPage)
     self:Refresh()
 end
 
