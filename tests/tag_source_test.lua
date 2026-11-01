@@ -47,7 +47,7 @@ assert(closed.state == "error" and closed.value == "Open your bank to convert a 
 local _, layout = h:OpenBank()
 h:Tick(2)
 -- Every present iron stack is drafted, placeholder excluded
--- Bank Tags numbers 101's entries 1, 2, and 3, matching the stacks
+-- 101 is listed once per matching stack, so Bank Tags counts it three times
 local iron = request("iron")
 assert(iron.state == "ready" and #iron.value == 1 and iron.value[1].name == "iron", tostring(iron.value))
 local keys = {}
@@ -55,10 +55,9 @@ for _, key in ipairs(iron.value[1].keys) do keys[key] = true end
 assert(#iron.value[1].keys == 4 and keys["object:101:1"] and keys["object:101:2"] and keys["object:101:3"]
     and keys["object:102:1"] and not keys["object:103:1"])
 
--- Only 101's second stack has over 6, so the copy would be wrong
+-- Only 101's second stack has over 6, so the draft holds one 101, whichever stack Bank Tags shows
 local big = request("Big stacks, iron")
-assert(big.state == "error" and big.value == "Iron bar: a later stack matched without the first, so it cannot be tagged exactly.",
-    big.value)
+assert(big.state == "ready" and #big.value[1].keys == 1 and big.value[1].keys[1] == "object:101:1", tostring(big.value))
 -- Tag names drop commas, which Bank Tags refuses
 assert(app:SaveQuery(nil, "Ores, all", "iron AND ore"))
 local ores = request("ores, all")

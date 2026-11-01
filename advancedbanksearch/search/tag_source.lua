@@ -1,5 +1,5 @@
 -- Offer saved queries as drafts in Bank Tags' Import window
--- Matches must include every copy from 1 onward, as Bank Tags numbers them
+-- A draft lists an object once per matching stack, as Bank Tags counts them
 
 local Ranking = require("advancedbanksearch/search/ranking")
 
@@ -17,7 +17,7 @@ local MAX_STACKS = 1999
 local FAILURES = {
     bank_closed = "Open your bank to convert a saved search.",
     not_all_items = 'Select "All Items" in your bank to convert a saved search.',
-    building = "Your bank is still loading; try again in a moment.",
+    busy = "Your bank is still loading; try again in a moment.",
     invalid = "RuneQL could not read this saved search.",
     needs_prices = "This saved search uses price fields, which need GE Prices.",
     prices_loading = "GE prices have not loaded yet; try again in a moment.",
@@ -95,24 +95,6 @@ function TagSource:Update()
     self.handle:UpdateImportProvider(PROVIDER_ID, self:Provider())
 end
 
--- Find the first object whose matches skip a copy number
-local function inexactObject(matches)
-    local copies = {}
-    for _, match in ipairs(matches) do
-        local list = copies[match.objectID] or {}
-        copies[match.objectID] = list
-        list[match.copy] = true
-    end
-    for objectID, list in pairs(copies) do
-        local count = 0
-        for _ in pairs(list) do count = count + 1 end
-        for copy = 1, count do
-            if not list[copy] then return objectID end
-        end
-    end
-    return nil
-end
-
 -- Answer with a draft of the query's current matches, or why not
 function TagSource:Answer(request)
     local app = self.app
@@ -123,18 +105,17 @@ function TagSource:Answer(request)
         return
     end
     local engine = app:RuneQL()
-    if engine == nil or app.handle == nil then
+    if engine == nil or app.ext == nil then
         request:Fail(self:Unavailable() or "Advanced Bank Search cannot read your bank now.")
         return
     end
-    local snapshot, reason = app.handle:GetBankItems()
-    if snapshot == nil then
+    local items, reason = app.ext:GetBankItems()
+    if items == nil then
         request:Fail(FAILURES[reason] or FAILURES.bank_closed)
         return
     end
-    local nameOf = Ranking.NameReader()
-    local outcome = Ranking.Search({ runeql = engine, text = record.query, items = snapshot.items,
-        excludePlaceholders = true, prices = app:Prices(), nameOf = nameOf })
+    local outcome = Ranking.Search({ runeql = engine, text = record.query, items = items,
+        excludePlaceholders = true, prices = app:Prices(), nameOf = Ranking.NameReader() })
     if outcome.state ~= "ok" then
         request:Fail(FAILURES[outcome.state])
         return
@@ -148,14 +129,7 @@ function TagSource:Answer(request)
         request:Fail("This search matches " .. #matches .. " stacks; Bank Tags imports at most 1,999.")
         return
     end
-    local inexact = inexactObject(matches)
-    if inexact ~= nil then
-        local itemName = string.sub(nameOf(inexact) or ("item " .. inexact), 1, 40)
-        request:Fail(itemName .. ": a later stack matched without the first, so it cannot be tagged exactly.")
-        return
-    end
-    local row = {}
-    for index, match in ipairs(matches) do row[index] = match.objectID end
+    local row = Ranking.Slots(matches)
     -- Bank Tags refuses commas in tag names
     local tagName = Ranking.Normalize(string.gsub(record.name, ",", " "))
     request:Resolve({ tags = { { name = tagName, rows = { row } } } })

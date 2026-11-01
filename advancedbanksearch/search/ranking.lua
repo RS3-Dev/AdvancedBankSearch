@@ -1,4 +1,5 @@
 -- Rank bank stacks against RuneQL text by score, then View All order
+-- A match names its object; Bank Core shows an object's stocked stacks first
 -- Price queries wait for prices, since "not" on a missing field matches everything
 
 local ItemFields = require("advancedbanksearch/search/item_fields")
@@ -44,7 +45,7 @@ function Ranking.Rank(items, score, excludePlaceholders)
         if not excludePlaceholders or (tonumber(item.quantity) or 0) > 0 then
             local value = score(item)
             if value ~= nil then
-                matches[#matches + 1] = { objectID = item.objectID, copy = item.copy, score = value, index = index }
+                matches[#matches + 1] = { objectID = item.objectID, score = value, index = index }
             end
         end
     end
@@ -73,10 +74,10 @@ function Ranking.Search(request)
     return { state = "ok", matches = matches }
 end
 
--- List matches as page slots naming each stack's copy
+-- List matches as page slots, one object ID per matching stack
 function Ranking.Slots(matches)
     local slots = {}
-    for index, match in ipairs(matches) do slots[index] = { item = match.objectID, copy = match.copy } end
+    for index, match in ipairs(matches) do slots[index] = match.objectID end
     return slots
 end
 

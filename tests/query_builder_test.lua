@@ -142,9 +142,9 @@ end
 local NAMES = { [1] = { name = "Rune bar" }, [2] = { name = "Rune ore" }, [3] = { name = "Untradeable" } }
 config = { Obj = { FromID = function(objectID) return NAMES[objectID] end } }
 local ITEMS = {
-    { objectID = 1, copy = 1, quantity = 100 },
-    { objectID = 2, copy = 1, quantity = 1 },
-    { objectID = 3, copy = 1, quantity = 1 },
+    { objectID = 1, quantity = 100 },
+    { objectID = 2, quantity = 1 },
+    { objectID = 3, quantity = 1 },
 }
 local PRICES = { [1] = { high = 12000, low = 11000 }, [2] = { high = 9000, low = 8500 } }
 local ready = false

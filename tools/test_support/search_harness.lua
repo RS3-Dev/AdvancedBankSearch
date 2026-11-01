@@ -30,11 +30,11 @@ function Harness.CoreRoot()
     if not exists(root .. "/main.lua") then
         error("Bank Core was not found at " .. root .. "; set BANKCORE_ROOT to a bank-utilities checkout", 0)
     end
-    local contract = readText(root .. "/HOST_CONTRACT.md") or ""
-    for _, needed in ipairs({ "PluginDependencyUpdate(event)", "the root is a plain table", "onBankItems",
-        "GetBankItems", "`{ label = text }` or `{ slots = list }`", "ctx:CreatePage" }) do
+    local contract = readText(root .. "/docs/API.md") or ""
+    for _, needed in ipairs({ "bankcore.Register(spec)", "ext:SetPage(page)", "ext:Open()", "onBankClose",
+        "ext:GetBankItems()", "ext:GetMenuItem(menu)" }) do
         if not string.find(contract, needed, 1, true) then
-            error("Bank Core at " .. root .. " lacks " .. needed .. " in its contract; set BANKCORE_ROOT "
+            error("Bank Core at " .. root .. " lacks " .. needed .. " in its API reference; set BANKCORE_ROOT "
                 .. "to a checkout with the extension API Advanced Bank Search uses", 0)
         end
     end
@@ -337,7 +337,7 @@ function Harness:App()
     return rawget(self.search.env._G, "__advancedbanksearch_session")
 end
 
--- Return the mounted Search tab's parent, if Bank Core mounted it
+-- Return the mounted Search column's parent, if Bank Core mounted it
 function Harness:TabParent()
     local layout = self:Session().layout
     return layout.tabMount ~= nil and layout.tabMount.values ~= nil and layout.tabMount.values.parent or nil
@@ -360,9 +360,9 @@ function Harness:OpenBank(width, height)
     return session, session.layout
 end
 
--- Choose a Core sidebar tab as the tab rail does
-function Harness:ChooseTab(ownerID, tabID)
-    self:Session().layout:SetSidebarMode("__bankutils_ext_tab:" .. ownerID .. "/" .. tabID)
+-- Click an extension's rail icon as the tab rail does
+function Harness:ChooseTab(ownerID)
+    self:Session().layout:SetSidebarMode("__bankutils_ext_tab:" .. ownerID)
 end
 
 -- Run logic ticks
@@ -372,9 +372,16 @@ end
 
 -- Build a menu over mounted content and let each plugin answer
 -- Plugins answer in subscription order, or Bank Core first with coreFirst
-function Harness:ContentMenu(coreFirst)
+-- With a native bank item, the menu is that item's, as the client gives its componentData
+function Harness:ContentMenu(coreFirst, item)
     local menu = { entries = { { verbText = "Cancel", actionType = MiniMenuActionType.CANCEL },
         { verbText = "Walk here", actionType = 23 } } }
+    if item ~= nil then
+        -- The client reports the bank's interface on the item's parents
+        self.bankHost.itemLayer.interfaceID = 517
+        menu.entries[2] = { verbText = "Withdraw-1", actionType = 57, componentData = { opIndex = 1,
+            objConfig = { id = item.associatedObjectID }, component = item } }
+    end
     setmetatable(menu, { __index = function(values, key)
         if key == "entryCount" then return #values.entries end
     end })

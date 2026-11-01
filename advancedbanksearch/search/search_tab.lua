@@ -1,5 +1,5 @@
--- Draw the Search tab: field, sort button, status, and saved queries
--- Refresh moves rows and status without rebuilding the field
+-- Draw the Search column: field, sort button, status, and saved queries
+-- Refresh and a height change move rows, status, and buttons without rebuilding the field
 
 local NativeButton = require("advancedbanksearch/search/native_button")
 
@@ -35,7 +35,7 @@ local HEADING = 0xE7C878FF
 local FOLDER_ROW = 0x302A21FF
 local SELECTED_BORDER = 0xD2A84DFF
 
--- Create the tab's mount callbacks, kept so Core keeps the column
+-- Create the column's callbacks for Bank Core
 function SearchTab.new(app)
     local self = setmetatable({ app = app, ctx = nil, controls = nil, sortMode = false, rowInfo = {},
         arrows = {} }, SearchTab)
@@ -44,7 +44,10 @@ function SearchTab.new(app)
             self.ctx = ctx
             self:Build()
         end,
-        resize = function() self:Build() end,
+        resize = function(ctx)
+            self.ctx = ctx
+            self:Resize()
+        end,
         unmount = function() self:Unmount() end,
     }
     return self
@@ -100,10 +103,10 @@ function SearchTab:Build()
     local ctx = self.ctx
     if ctx == nil then return end
     local app = self.app
-    local bounds = ctx:GetBounds()
     local parent = ctx.parent
-    local width = math.max(1, bounds.width - X * 2)
-    local controls = { parent = parent, owned = {}, width = width, height = bounds.height }
+    local width = math.max(1, ctx.width - X * 2)
+    local controls = { parent = parent, owned = {}, footer = {}, columnWidth = ctx.width, width = width,
+        height = ctx.height }
     local owned = controls.owned
     -- Tooltips use the window overlay so the column does not clip them
     local overlay = ctx.overlay
@@ -140,7 +143,7 @@ function SearchTab:Build()
     controls.empty = addText(parent, "No saved searches yet. Press New to save one.", BODY_TOP + 6,
         width, 40, MUTED, 2)
     owned[#owned + 1] = controls.empty
-    local top = bounds.height - FOOTER_HEIGHT + 8
+    local top = ctx.height - FOOTER_HEIGHT + 8
     local buttonWidth = math.floor((width - BUTTON_GAP * 2) / 3)
     -- Add one footer button at a column
     local function button(label, column, action)
@@ -148,12 +151,27 @@ function SearchTab:Build()
             x = X + (column - 1) * (buttonWidth + BUTTON_GAP), y = top, width = buttonWidth, height = BUTTON_HEIGHT,
         })
         owned[#owned + 1] = value
+        controls.footer[column] = value
         return value
     end
     controls.new = button("New", 1, function() app:NewQuery() end)
     controls.edit = button("Edit", 2, function() app:EditQuery() end)
     controls.delete = button("Delete", 3, function() app:DeleteQuery() end)
     self.controls = controls
+    self:Refresh()
+end
+
+-- Fit the column to its new size, keeping the field and its focus when only the height changed
+function SearchTab:Resize()
+    local controls, ctx = self.controls, self.ctx
+    if controls == nil or ctx == nil or controls.columnWidth ~= ctx.width then
+        self:Build()
+        return
+    end
+    controls.height = ctx.height
+    local top = ctx.height - FOOTER_HEIGHT + 8
+    for _, button in ipairs(controls.footer) do button.root:SetPos(button.root.x, top) end
+    controls.listTop = nil
     self:Refresh()
 end
 

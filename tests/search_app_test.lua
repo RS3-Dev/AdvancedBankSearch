@@ -21,14 +21,14 @@ local session, layout = h:OpenBank()
 local service = session.pluginPages
 h:Tick(2)
 local controls = app.tab.controls
-assert(controls ~= nil and h:TabParent() ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
+assert(controls ~= nil and h:TabParent() ~= nil, "the Search column did not mount: " .. tostring(h:LoggedFailure()))
 
 -- Count the pages this plugin gives Bank Core
 local updates = 0
-local createPage = service.CreatePage
-service.CreatePage = function(pages, owner, page)
+local setPage = service.SetPage
+service.SetPage = function(pages, owner, page)
     if owner.id == "advancedbanksearch" then updates = updates + 1 end
-    return createPage(pages, owner, page)
+    return setPage(pages, owner, page)
 end
 local function takeUpdates()
     local count = updates
@@ -54,15 +54,15 @@ local function press(button)
     h:Tick(2)
 end
 
--- Describe the shown page: labels, then object:copy, ? for placeholders
+-- Describe the shown page below its title: labels, then object=quantity for each stack
 local function shown()
     local entries = {}
-    for _, heading in ipairs(layout.pageState:GetLayoutSections()) do
-        entries[#entries + 1] = { y = heading.y, x = -1, text = "[" .. heading.label .. "]" }
+    for index, heading in ipairs(layout.pageState:GetLayoutSections()) do
+        -- The first heading is the page title
+        if index > 1 then entries[#entries + 1] = { y = heading.y, x = -1, text = "[" .. heading.label .. "]" } end
     end
     for _, entry in ipairs(layout:BuildPageItems()) do
-        entries[#entries + 1] = { y = entry.y, x = entry.x,
-            text = string.gsub(entry.layoutKey, "^object:", "") .. (entry.placeholder and "?" or "") }
+        entries[#entries + 1] = { y = entry.y, x = entry.x, text = entry.objectID .. "=" .. tostring(entry.quantity) }
     end
     table.sort(entries, function(a, b)
         if a.y == b.y then return a.x < b.x end
@@ -73,7 +73,8 @@ local function shown()
     return table.concat(parts, " ")
 end
 
--- The shown page's key, or nil in the bank's own view
+-- Bank Core's key for the shown opening, or nil in the bank's own view
+-- Opening again changes it; a redraw in place keeps it
 local function key()
     return layout.shownPage ~= nil and layout.shownPage.key or nil
 end
@@ -90,19 +91,21 @@ end
 -- One character shows nothing; longer text opens the search page
 -- RuneQL matches whole terms
 type("i")
-assert(key() == nil and app.shownPage == nil)
+assert(key() == nil and app:ShownPage() == nil)
 type("iron")
-assert(key() == "search:1" and app.shownPage == "search", tostring(key()))
+assert(key() ~= nil and app:ShownPage() == "search")
 assert(layout.shownPage.title == "Search")
 -- Every iron stack, placeholder included, and never the lobster
 local first = shown()
-assert(string.find(first, "103:1?", 1, true) and string.find(first, "101:2", 1, true) and not string.find(first, "105"), first)
+assert(string.find(first, "103=0", 1, true) and string.find(first, "101=3", 1, true) and not string.find(first, "105"), first)
 assert(controls.status.content == "5 matches.", controls.status.content)
--- New text gets a new key and starts at the top
+-- New text opens again, starting at the top; 101 is listed once per matching stack
+local opening = key()
 type("iron bar")
-assert(key() == "search:2" and string.find(shown(), "^101:1 101:2"), shown())
+assert(key() ~= opening and string.find(shown(), "^101=5 101=3 "), shown())
 
--- A bank change reranks under the same key
+-- A bank change reranks in place; Core shows 101's stocked stack before its placeholder
+opening = key()
 takeUpdates()
 host:Rebuild(function(specs)
     specs[1][2] = 0
@@ -110,14 +113,8 @@ host:Rebuild(function(specs)
 end)
 layout:HandleInventoryUpdate()
 h:Tick(4)
-assert(key() == "search:2")
-assert(string.find(shown(), "101:1?", 1, true), shown())
--- A bank change with the same results sends nothing
-takeUpdates()
-host:Rebuild()
-layout:HandleInventoryUpdate()
-h:Tick(4)
-assert(takeUpdates() == 0)
+assert(takeUpdates() == 1 and key() == opening)
+assert(string.find(shown(), "^101=3 101=0 "), shown())
 
 -- Text RuneQL cannot read shows why
 type("name:(iron")
@@ -128,7 +125,7 @@ type("dragon")
 assert(shown() == "[No items match]" and controls.status.content == "No items match.")
 -- Clearing the text returns to the bank's own view
 type("")
-assert(key() == nil and app.shownPage == nil)
+assert(key() == nil and app:ShownPage() == nil)
 
 -- Typing pauses --------------------------------------------------------------------------
 
@@ -151,19 +148,19 @@ end
 
 -- Rapid typing searches once, 10 quiet ticks after the last key
 takeUpdates()
-local field, serial = controls.field, app.serial
+local field = controls.field
 for _, text in ipairs({ "ir", "iro", "iron", "iron b", "iron ba" }) do
     enter(text)
     h:Tick(9)
 end
 assert(takeCompiled() == "" and takeUpdates() == 0 and key() == nil and app.text == "" and app.draft == "iron ba")
-assert(waiting() and app.serial == serial)
+assert(waiting())
 enter("iron bar")
 h:Tick(9)
 assert(takeCompiled() == "" and takeUpdates() == 0 and key() == nil)
 h:Tick()
-assert(takeCompiled() == "iron bar" and takeUpdates() == 1 and app.serial == serial + 1)
-assert(key() == "search:" .. app.serial and string.find(shown(), "^101:1%?? 101:2"), shown())
+assert(takeCompiled() == "iron bar" and takeUpdates() == 1)
+assert(app:ShownPage() == "search" and string.find(shown(), "^101=3 101=0 "), shown())
 assert(not waiting() and controls.field == field and field:GetText() == "iron bar")
 h:Tick(20)
 assert(takeCompiled() == "" and takeUpdates() == 0)
@@ -180,11 +177,11 @@ h.host:Notify("geprices", false, false)
 h:Tick(2)
 local during = takeCompiled()
 assert(string.find(during, "iron bar", 1, true) and not string.find(during, "lobster", 1, true), during)
-assert(app.text == "iron bar" and string.find(shown(), "^101:1%?? 101:2") and waiting(), shown())
+assert(app.text == "iron bar" and string.find(shown(), "^101=3 101=0 ") and waiting(), shown())
 h:Tick(4)
 assert(takeCompiled() == "lobster" and app.text == "lobster" and not waiting())
 h:Tick(2)
-assert(shown() == "105:1", shown())
+assert(shown() == "105=9", shown())
 
 -- Clearing or short text applies at once and drops the waiting search
 enter("iron ore")
@@ -202,14 +199,18 @@ h:Tick(20)
 local settled = takeCompiled()
 assert(key() == nil and string.find(settled, "lobster", 1, true) and not string.find(settled, "lobster b", 1, true), settled)
 
--- A resize keeps the typed text and its wait without searching
+-- A taller column keeps the field, its text, and its wait without searching
+-- The footer buttons move to the new bottom and the list grows
 enter("iron ore")
 h:Tick(5)
-app.tab.callbacks.resize()
-controls = app.tab.controls
-assert(controls.field ~= field and controls.field:GetText() == "iron ore" and waiting() and takeCompiled() == "")
+local listHeight, footerTop = controls.list.root.height, controls.new.root.y
+layout:ResizeSidebar(layout.sidebarHeight + 40)
+assert(app.tab.controls == controls and controls.field == field and controls.field:GetText() == "iron ore")
+assert(waiting() and takeCompiled() == "" and h:TabParent() == app.tab.ctx.parent)
+assert(controls.new.root.y == footerTop + 40 and controls.delete.root.y == footerTop + 40)
+assert(controls.list.root.height == listHeight + 40, tostring(controls.list.root.height))
 h:Tick(5)
-assert(takeCompiled() == "iron ore" and string.find(key(), "^search:") and controls.field:GetText() == "iron ore")
+assert(takeCompiled() == "iron ore" and app:ShownPage() == "search" and controls.field:GetText() == "iron ore")
 type("")
 
 -- Typing updates disabled states only when they change
@@ -264,9 +265,9 @@ assert(h.databases.advancedbanksearch["advancedbanksearch:queries:v1:manifest"] 
 enter("lobster")
 assert(controls.list:Click("1"))
 h:Tick(20)
-assert(key() == "query:1" and layout.shownPage.title == "Iron")
+assert(app:ShownPage() == "query" and layout.shownPage.title == "Iron")
 assert(not waiting() and app.text == "" and controls.field:GetText() == "lobster")
-assert(not string.find(shown(), "?", 1, true) and string.find(shown(), "101:2", 1, true), shown())
+assert(shown() == "101=5 102=5 104=5 101=3", shown())
 assert(rows() == "Iron (4)", rows())
 -- Choosing it again returns to the bank's own view
 assert(controls.list:Click("1"))
@@ -281,8 +282,8 @@ app.editor.nameField:SetText("Bars")
 app.editor.queryField:SetText('name:"iron bar"')
 press(app.editor.saveButton)
 h:Tick(2)
-assert(layout.shownPage.title == "Bars" and key() == "query:1")
-assert(shown() == "101:1 101:2" and rows() == "Bars (2)", shown())
+assert(layout.shownPage.title == "Bars" and app:ShownPage() == "query")
+assert(shown() == "101=5 101=3" and rows() == "Bars (2)", shown())
 
 -- A refused save shows in the editor and changes nothing
 local database = h.search.env.PersistentDB
@@ -299,7 +300,7 @@ press(app.editor.saveButton)
 assert(app.editor == nil and rows() == "Bars (2) | Lobster")
 
 -- Saving another query selects it but keeps the shown page
-assert(key() == "query:1" and app.selectedQuery == "2")
+assert(app:ShownPage() == "query" and app.pageQuery == "1" and app.selectedQuery == "2")
 
 -- Unreadable query text is refused with RuneQL's reason
 -- Nothing is written and the editor and tab stay as they were
@@ -318,7 +319,7 @@ app.editor.nameField:SetText("Broken")
 app.editor.queryField:SetText("iron AND (")
 press(app.editor.saveButton)
 assert(app.editor ~= nil and app.editor.status.content == tostring(unreadableReason), app.editor.status.content)
-assert(stored() == before and rows() == "Bars (2) | Lobster" and app.selectedQuery == "2" and key() == "query:1")
+assert(stored() == before and rows() == "Bars (2) | Lobster" and app.selectedQuery == "2" and app:ShownPage() == "query")
 app:CloseEditor()
 -- Editing an unshown query drops its count only when saved
 assert(controls.list:Click("1"))
@@ -334,7 +335,7 @@ assert(app.editor == nil and app.queries:Get("1").query == "iron" and rows() == 
 -- Showing it counts it afresh
 assert(controls.list:Click("1"))
 h:Tick(2)
-assert(key() == "query:1" and rows() == "Bars (4) | Lobster", rows())
+assert(app:ShownPage() == "query" and rows() == "Bars (4) | Lobster", rows())
 
 -- Delete asks once, then deletes and leaves the page
 assert(controls.list:Click("1"))
@@ -342,11 +343,11 @@ h:Tick(2)
 assert(key() == nil and app.selectedQuery == "1")
 assert(controls.list:Click("1"))
 h:Tick(2)
-assert(key() == "query:1")
+assert(app:ShownPage() == "query")
 press(controls.delete)
 assert(app.queries:Get("1") ~= nil and controls.status.content == 'Press Delete again to delete "Bars".')
 press(controls.delete)
-assert(app.queries:Get("1") == nil and key() == nil and rows() == "Lobster")
+assert(app.queries:Get("1") == nil and key() == nil and app.pageID == nil and rows() == "Lobster")
 
 -- Price queries -------------------------------------------------------------------------
 
@@ -380,32 +381,34 @@ assert(wait.ticks == 30 and app.priceWait == nil)
 h:Tick(2)
 -- Once prices load, unpriced or cheap iron stacks are ranked
 assert(app.priceWait == nil and h.bankHost:Listener("advancedbanksearch_price_wait") == nil)
-assert(not string.find(shown(), "101", 1, true) and string.find(shown(), "102:1", 1, true), shown())
+assert(not string.find(shown(), "101", 1, true) and string.find(shown(), "102=5", 1, true), shown())
 
 -- A wait from an earlier search is dropped when it changes
 ready = false
 type("price:[1 TO *]")
 assert(app.priceWait ~= nil)
-local waitKey = app.priceWait.key
 type("lobster")
-assert(app.priceWait == nil and key() ~= waitKey and shown() == "105:1", shown())
+assert(app.priceWait == nil and shown() == "105=9", shown())
 ready = true
 for _ = 1, 60 do h:Tick() end
-assert(shown() == "105:1")
+assert(shown() == "105=9")
 
 -- Prices that arrive after the player picks a native tab show nothing, even a bank change
--- heard before the page's notice; the bank keeps its own view
+-- heard before the page's close; the bank keeps its own view and the page is only stored
 ready = false
 type("price:[3 TO *]")
-assert(app.priceWait ~= nil and app.shownPage == "search")
-takeUpdates()
+assert(app.priceWait ~= nil and app:ShownPage() == "search")
 layout:SetNativeViewAll(false)
 app:OnBankItems()
-assert(layout.shownPage == nil and takeUpdates() == 0)
+assert(layout.shownPage == nil and app:ShownPage() == nil and app.pageID == "search")
 ready = true
 for _ = 1, 60 do h:Tick() end
-assert(layout.shownPage == nil and app.shownPage == nil and app.priceWait == nil and takeUpdates() == 0)
+assert(layout.shownPage == nil and app.priceWait == nil)
+-- Outside All Items, a new search says what to do in the status line
+type("lobster")
+assert(layout.shownPage == nil and controls.status.content == 'Select "All Items" to view these search results.')
 layout:SetNativeViewAll(true)
+h:Tick(2)
 
 -- A wait gives up after 1,800 ticks; the query is kept
 ready = false
@@ -445,7 +448,7 @@ h.host:Notify("runeql", true, true)
 h:Tick()
 assert(not controls.field.disabled)
 type("lobster")
-assert(shown() == "105:1")
+assert(shown() == "105=9")
 
 -- Closing the bank leaves the page and closes the editor
 -- Waiting typed text is dropped too
@@ -454,9 +457,9 @@ assert(app.editor ~= nil)
 enter("iron")
 assert(waiting())
 h.bankHost:UnmountBankWindow()
-session.layout:Restore()
+session:CloseBank()
 h:Tick(20)
-assert(app.editor == nil and app.shownPage == nil and not waiting())
+assert(app.editor == nil and app:ShownPage() == nil and not waiting() and app.items == nil)
 
 h.host:Unload("advancedbanksearch")
 h.host:Unload("bankcore")

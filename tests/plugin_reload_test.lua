@@ -32,30 +32,35 @@ assert(app:SaveQuery(nil, "Iron", "iron"))
 for key in pairs(h.databases.advancedbanksearch) do assert(string.find(key, "^advancedbanksearch:queries:v1:"), key) end
 assert(next(h.databases.runeql or {}) == nil)
 local core = h:LoadCore()
-assert(app:IsConnected() and app.bank == core.result)
+assert(app:IsConnected() and not app.ext:IsOpen())
 for _, subscription in ipairs(h.host:SubscriptionsOf("advancedbanksearch")) do
     assert(string.sub(subscription, 1, 18) ~= "ContentLayerReady.", subscription .. " is a plugin panel")
 end
-local state = app.handle:GetState()
-assert(not state.pageVisible and state.tabs[1] == "search")
 h:OpenBank()
 h:Tick(2)
-assert(app.tab.controls ~= nil and app:ChooseQuery("1"))
+-- One rail icon, named for the plugin, with its column
+local icon = h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch")
+assert(icon ~= nil and icon.icon == "SEARCH" and icon.tooltip == "Advanced Bank Search" and icon.mount ~= nil)
+assert(app.tab.controls ~= nil and app:ChooseQuery("1") and app:ShownPage() == "query")
 
--- A Core reload reconnects and the tab mounts again
-local oldAPI = core.result
+-- A Core reload registers again, and the column mounts again
+local oldExt = app.ext
 h.host:Reload("bankcore", { shutdown = true, notify = true, reinject = true })
-assert(not oldAPI.GetState().running and app:IsConnected() and app.bank == core.result)
-assert(app.shownPage == nil and app.snapshot == nil)
+assert(app:IsConnected() and app.ext ~= oldExt and select(2, oldExt:Open()) == "stale")
+assert(app:ShownPage() == nil and app.items == nil and app.pageID == nil)
 h:OpenBank()
 h:Tick(2)
 assert(app.tab.controls ~= nil)
 
--- A copied Core API still connects after a reload
+-- A copied Core API still registers after a reload
+oldExt = app.ext
 h.host:Reload("bankcore", { shutdown = true })
 h.host.exports.bankcore = Loader.Clone(core.result)
 h.host:Notify("bankcore", true, true)
-assert(app:IsConnected() and app.bank == h.host.exports.bankcore and getmetatable(app.bank) == nil)
+assert(getmetatable(h.host.exports.bankcore) == nil and app:IsConnected() and app.ext ~= oldExt)
+h:OpenBank()
+h:Tick(2)
+assert(app.tab.controls ~= nil and app:ChooseQuery("1") and app:ShownPage() == "query")
 
 -- Core unloading mid-wait releases the plugin and ends the wait
 h.host:Unload("bankcore")
@@ -101,17 +106,16 @@ h:Tick(2)
 hot:SetText("price:[3 TO *]")
 hot:QueueText("price:[4 TO *]")
 assert(hot.priceWait ~= nil and hot.searchWait ~= nil)
-assert(h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch/search") ~= nil)
+assert(h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch") ~= nil)
 h.host:Unload("advancedbanksearch")
 assert(not hot:IsConnected() and hot.priceWait == nil and hot.searchWait == nil)
 for _, subscription in ipairs(h.host:SubscriptionsOf("advancedbanksearch")) do
     error("Advanced Bank Search left " .. subscription .. " subscribed")
 end
-assert(h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch/search") == nil)
+assert(h:Session().layout:FindSidebarTab("__bankutils_ext_tab:advancedbanksearch") == nil)
 h.host:Unload("bankcore")
 
--- In separate Lua states, a newer copy takes the owner ID
--- The older copy stays idle when told Core loaded
+-- In separate Lua states, a newer copy's registration replaces the older one
 local split = Harness.new("plugin_reload_split", { separateGlobals = true, cloneExports = true })
 split:LoadCore()
 local first = split:LoadSearch()
@@ -120,8 +124,7 @@ assert(firstApp:IsConnected() and rawget(first.env._G, "__bankcore_api") == nil)
 local second = split.host:Load("advancedbanksearch_copy", split.searchFolder, { name = "advancedbanksearch",
     dependencies = {}, optional = { bankcore = true, runeql = true, geprices = true, banktags = true } })
 local secondApp = rawget(second.env, "__advancedbanksearch_session")
-assert(secondApp:IsConnected() and not firstApp:IsConnected())
-rawget(first.env, "PluginDependencyUpdate")({ pluginIdentifier = "bankcore", enabled = true })
-assert(firstApp.retired and not firstApp:IsConnected() and secondApp:IsConnected())
+assert(secondApp:IsConnected() and select(2, firstApp.ext:Open()) == "stale")
+assert(select(2, secondApp.ext:Open()) == "no_page")
 
 print("plugin_reload_test: ok")

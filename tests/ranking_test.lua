@@ -15,20 +15,20 @@ local NAMES = {
 }
 config = { Obj = { FromID = function(objectID) return NAMES[objectID] end } }
 
--- A snapshot where 103 is a placeholder and 101 has two stacks
+-- Bank items as Bank Core reads them: 103 is a placeholder and 101 has two stacks
 local ITEMS = {
-    { objectID = 101, copy = 1, quantity = 5, placeholder = false },
-    { objectID = 102, copy = 1, quantity = 5, placeholder = false },
-    { objectID = 103, copy = 1, quantity = 0, placeholder = true },
-    { objectID = 104, copy = 1, quantity = 5, placeholder = false },
-    { objectID = 105, copy = 1, quantity = 9, placeholder = false },
-    { objectID = 101, copy = 2, quantity = 3, placeholder = false },
+    { objectID = 101, quantity = 5 },
+    { objectID = 102, quantity = 5 },
+    { objectID = 103, quantity = 0 },
+    { objectID = 104, quantity = 5 },
+    { objectID = 105, quantity = 9 },
+    { objectID = 101, quantity = 3 },
 }
 
--- Describe matches as object:copy in order
+-- Describe matches as object@bank position in order
 local function listed(matches)
     local parts = {}
-    for index, match in ipairs(matches) do parts[index] = match.objectID .. ":" .. match.copy end
+    for index, match in ipairs(matches) do parts[index] = match.objectID .. "@" .. match.index end
     return table.concat(parts, " ")
 end
 
@@ -47,10 +47,10 @@ local ranked = Ranking.Rank(ITEMS, function(item)
     if item.objectID == 105 then return nil end
     return item.objectID == 104 and 2 or 1
 end)
-assert(listed(ranked) == "104:1 101:1 102:1 103:1 101:2", listed(ranked))
-assert(listed(Ranking.Rank(ITEMS, function() return 1 end, true)) == "101:1 102:1 104:1 105:1 101:2")
-local slots = Ranking.Slots(ranked)
-assert(slots[1].item == 104 and slots[1].copy == 1 and slots[5].item == 101 and slots[5].copy == 2)
+assert(listed(ranked) == "104@4 101@1 102@2 103@3 101@6", listed(ranked))
+assert(listed(Ranking.Rank(ITEMS, function() return 1 end, true)) == "101@1 102@2 104@4 105@5 101@6")
+-- Slots name each match's object, once per matching stack
+assert(table.concat(Ranking.Slots(ranked), " ") == "104 101 102 103 101")
 
 -- Every iron stack matches by score, then bank order
 -- The placeholder is included unless excluded; the lobster never matches
@@ -58,18 +58,18 @@ local outcome = search("iron")
 assert(outcome.state == "ok")
 local seen = {}
 for index, match in ipairs(outcome.matches) do
-    seen[match.objectID .. ":" .. match.copy] = true
+    seen[match.objectID .. "@" .. match.index] = true
     local nextMatch = outcome.matches[index + 1]
     if nextMatch ~= nil then
         assert(match.score > nextMatch.score or (match.score == nextMatch.score and match.index < nextMatch.index))
     end
 end
-assert(#outcome.matches == 5 and seen["101:1"] and seen["101:2"] and seen["103:1"] and not seen["105:1"])
+assert(#outcome.matches == 5 and seen["101@1"] and seen["101@6"] and seen["103@3"] and not seen["105@5"])
 assert(#search("iron", { excludePlaceholders = true }).matches == 4)
 -- An exact name match ranks first
 assert(search('name:"iron platebody"').matches[1].objectID == 104)
 -- Quantity is a field RuneQL reads from the stack
-assert(listed(search("qty:[6 TO *]").matches) == "105:1")
+assert(listed(search("qty:[6 TO *]").matches) == "105@5")
 
 -- Text RuneQL cannot read reports its reason
 local invalid = search("name:(iron")
@@ -103,10 +103,10 @@ local prices = {
 assert(search("price:[100 TO *]", { prices = prices }).state == "prices_loading")
 -- Ready prices join each stack; missing or zero means no price
 ready = true
-assert(listed(search("price:[100 TO *]", { prices = prices }).matches) == "105:1")
-assert(listed(search("gelow:[1 TO 50]", { prices = prices }).matches) == "101:1 101:2")
-assert(listed(search("lobster AND gehigh:[200 TO 200]", { prices = prices }).matches) == "105:1")
+assert(listed(search("price:[100 TO *]", { prices = prices }).matches) == "105@5")
+assert(listed(search("gelow:[1 TO 50]", { prices = prices }).matches) == "101@1 101@6")
+assert(listed(search("lobster AND gehigh:[200 TO 200]", { prices = prices }).matches) == "105@5")
 -- A query without price fields never needs GE Prices
-assert(search("lobster").state == "ok" and listed(search("lobster").matches) == "105:1")
+assert(search("lobster").state == "ok" and listed(search("lobster").matches) == "105@5")
 
 print("ranking_test: ok")

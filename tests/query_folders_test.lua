@@ -1,6 +1,6 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
--- Drive the Search tab's folders, sorting, layout, and row menus
+-- Drive the Search column's folders, sorting, layout, and row menus
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
 local Harness = require("tools/test_support/search_harness")
@@ -17,7 +17,7 @@ h:Tick(2)
 local tab = app.tab
 local controls = tab.controls
 local parent = h:TabParent()
-assert(controls ~= nil and parent ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
+assert(controls ~= nil and parent ~= nil, "the Search column did not mount: " .. tostring(h:LoggedFailure()))
 
 -- Type into the search field as the host reports it
 local function enter(text)
@@ -49,9 +49,11 @@ local function rowNamed(label)
     error("no row " .. label .. " in " .. rows())
 end
 
--- The shown page's key, or nil in the bank's own view
+-- Name the shown page as search or query:<id>, or nil in the bank's own view
 local function key()
-    return layout.shownPage ~= nil and layout.shownPage.key or nil
+    local page = app:ShownPage()
+    if page == "query" then return "query:" .. app.pageQuery end
+    return page
 end
 
 -- Compact layout ------------------------------------------------------------------------
@@ -226,21 +228,28 @@ assert(not tab.sortMode and #tab.arrows == 0 and app.searchWait ~= nil and app.t
 h:Tick(12)
 assert(not tab.sortMode and #tab.arrows == 0 and icon.spriteID == swap.neutral)
 assert(controls.field == field and not field.root.destroyed and field:GetText() == "iron" and app.text == "iron")
-assert(app.shownPage == "search" and string.find(key(), "^search:"), tostring(key()))
+assert(key() == "search" and layout.shownPage.title == "Search", tostring(key()))
 type("iron b")
 assert(controls.field == field and app.text == "iron b" and not tab.sortMode)
 -- Sorting keeps the search; clearing the field keeps sorting
 pressSort()
-assert(tab.sortMode and field:GetText() == "iron b" and app.text == "iron b" and app.shownPage == "search")
+assert(tab.sortMode and field:GetText() == "iron b" and app.text == "iron b" and key() == "search")
 type("")
-assert(tab.sortMode and app.shownPage == nil and controls.field == field)
--- A resize while sorting rebuilds the column with one tooltip layer
-tab.callbacks.resize()
+assert(tab.sortMode and key() == nil and controls.field == field)
+-- A narrower column is rebuilt while sorting, with one tooltip layer
+local resized = tab.ctx
+resized.width = resized.width - 20
+tab.callbacks.resize(resized)
 assert(tab.sortMode and button.destroyed and icon.destroyed and tooltip.root == nil)
 controls = tab.controls
 assert(controls.sort ~= sort and controls.sort.icon.spriteID == swap.active and #tab.arrows > 0)
 assert(#prettyui.Tooltip.getContext(parent).tooltips == 1)
 assert(prettyui.Tooltip.getContext(parent).tooltips[1] == controls.sort.tooltip)
+assert(controls.width == width - 20)
+resized.width = resized.width + 20
+tab.callbacks.resize(resized)
+controls = tab.controls
+assert(controls.width == width and tab.sortMode)
 -- Unmounting ends sorting; remounting shows the saved order
 sort, tooltip = controls.sort, controls.sort.tooltip
 local tooltipRoot = tooltip.root
@@ -259,7 +268,7 @@ assert(app.searchWait == nil and h.bankHost:Listener("advancedbanksearch_search_
 tab.callbacks.mount(mounted)
 controls = tab.controls
 h:Tick(20)
-assert(controls.field:GetText() == "iron ore" and app.shownPage == nil and app.text == "")
+assert(controls.field:GetText() == "iron ore" and key() == nil and app.text == "")
 -- Show Bars and close Smithing before the menu checks
 assert(controls.list:Click("1"))
 assert(controls.list:Click("folder:1"))
@@ -297,6 +306,16 @@ assert(not app.queries:GetFolder("1").collapsed and rows() == "Fish | Smithing (
 -- Nothing is offered outside the rows
 h:PointAt(parent, 20, controls.list.root.y + controls.list.root.height + 2)
 assert(Harness.Labels(h:ContentMenu()) == "Walk here | Cancel")
+-- A bank item's menu in the bank's own view gets no row actions, wherever the pointer is
+assert(app.ext:Close() and key() == nil)
+h:PointAt(parent, 20, controls.list.root.y + 10)
+local itemMenu = h:ContentMenu(false, h.bankHost.items[1])
+local menuItem = app.ext:GetMenuItem(itemMenu)
+assert(menuItem.objectID == 101 and menuItem.slot == nil)
+assert(#itemMenu.entries == 2 and not string.find(Harness.Labels(itemMenu), "Fish", 1, true), Harness.Labels(itemMenu))
+assert(app:ChooseQuery("1") and key() == "query:1")
+app:ShowStatus(nil)
+app:Refresh()
 
 -- Rename folder refuses a taken name and saves a new one
 Harness.Choose(menuOver("Smithing (2)"), "Rename folder")

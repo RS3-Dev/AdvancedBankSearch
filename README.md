@@ -38,7 +38,7 @@ Quantity refers to the number in a bank stack. GE prices are **per item**, not t
 
 An item without the requested price does not match a price condition. If GE Prices is still loading, the page waits instead of treating missing prices as zero. Prices are estimates, not guaranteed sale proceeds.
 
-Saved searches exclude bank placeholders; the temporary search field can include them.
+Saved searches exclude bank placeholders; the temporary search field can include them. An item that matches in several stacks is listed once per matching stack, and the bank shows that item's stocked stacks first, then its placeholders, so the stacks shown are not always the ones that matched.
 
 ## Organize saved searches
 
@@ -55,9 +55,9 @@ With Bank Tags enabled, open its **Import/Share** window, choose **Saved bank se
 ## If something is missing
 
 - **Search field or Save disabled:** enable RuneQL.
-- **No Search tab:** check Bank Core and PrettyUI. If the client log says Advanced Bank Search needs a newer Bank Core, update Bank Core.
+- **No Search icon:** check Bank Core and PrettyUI.
 - **Price search waiting:** check GE Prices and allow its data to load.
-- **Page refuses to open:** switch to the bank's native All Items tab.
+- **Page refuses to open:** the line under the search field says why. Usually switch to the bank's native All Items tab or close the preset selector, then search again.
 - **Old saved searches missing:** the older integrated Bank Utilities plugin uses separate saved data. Copy its query text into a new search here; migration is not automatic.
 
 ## For reviewers and developers

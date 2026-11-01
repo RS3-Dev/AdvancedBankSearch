@@ -45,50 +45,47 @@ for _, options in ipairs({ {}, { separateGlobals = true, cloneExports = true } }
     local cleanerApp = rawget(cleaner.env._G, "__bankcleaner_session")
     local searchApp = h:App()
     assert(cleanerApp ~= nil and searchApp ~= nil and cleanerApp ~= searchApp)
-    assert(cleanerApp:IsConnected() and searchApp:IsConnected())
+    assert(cleanerApp.ext ~= nil and searchApp:IsConnected())
 
-    -- Both tabs show in owner order, and connecting shows no page
+    -- Both icons show in ID order, and registering shows no page
     local _, layout = h:OpenBank()
     h:Tick(2)
     local ids = {}
     for index, tab in ipairs(layout.extensionTabs) do ids[index] = tab.id end
-    assert(table.concat(ids, " ") == "__bankutils_ext_tab:advancedbanksearch/search __bankutils_ext_tab:bankcleaner/cleanup",
+    assert(table.concat(ids, " ") == "__bankutils_ext_tab:advancedbanksearch __bankutils_ext_tab:bankcleaner",
         table.concat(ids, " "))
-    assert(not cleanerApp.handle:GetState().pageVisible and not searchApp.handle:GetState().pageVisible)
+    assert(not cleanerApp.ext:IsOpen() and not searchApp.ext:IsOpen())
     assert(layout.shownPage == nil)
 
-    -- Each plugin's pages work from its own tab
-    h:ChooseTab("advancedbanksearch", "search")
+    -- Each plugin's pages work from its own column
+    h:ChooseTab("advancedbanksearch")
     h:Tick(2)
-    assert(searchApp.tab.controls ~= nil and not cleanerApp.tabActive)
+    assert(searchApp.tab.controls ~= nil and cleanerApp.sidebar == nil)
     assert(searchApp:SaveQuery(nil, "Bars", "bar"))
     searchApp:SetText("bar")
     h:Tick(2)
-    assert(layout.shownPage.key == "search:1")
-    h:ChooseTab("bankcleaner", "cleanup")
+    assert(searchApp:ShownPage() == "search" and layout.shownPage.title == "Search")
+    h:ChooseTab("bankcleaner")
     h:Tick(4)
-    assert(searchApp.shownPage == nil and cleanerApp.tabActive and not cleanerApp:IsBusy())
-    -- Search shows its page again, and Bank Cleaner's row list then shows a category in the
-    -- same tick; Search's bank and price updates before it hears that leave Cleaner's page
-    searchApp:SetText("iron")
-    assert(searchApp.shownPage == "search" and layout.shownPage.key == "search:2")
-    assert(cleanerApp.sidebar ~= nil and cleanerApp.sidebar.list:Click("metal_bank"))
+    assert(searchApp:ShownPage() == "search" and cleanerApp.sidebar ~= nil and not cleanerApp:IsBusy())
+    -- Bank Cleaner shows a category in the same tick as Search's bank and price updates;
+    -- Search only stores its page, so Cleaner's page stays
+    assert(cleanerApp.sidebar.list:Click("metal_bank"))
     searchApp:OnBankItems()
     searchApp:DependencyChanged("geprices", true)
-    assert(layout.shownPage.key == "cleanup:metal_bank" and searchApp.shownPage == "search")
+    assert(cleanerApp:ShownCategory() == "metal_bank" and searchApp:ShownPage() == nil)
     h:Tick(2)
-    assert(layout.shownPage.key == "cleanup:metal_bank" and cleanerApp.shownCategory == "metal_bank")
-    assert(searchApp.shownPage == nil)
+    assert(cleanerApp:ShownCategory() == "metal_bank" and searchApp:ShownPage() == nil)
     checkSeparate(h, cleaner, search)
 
     -- Reloading this plugin leaves Bank Cleaner's tab and page
     h.host:Reload("advancedbanksearch", { freshEnvironment = true })
     h:Tick(2)
-    assert(h:App():IsConnected() and cleanerApp:IsConnected())
+    assert(h:App():IsConnected() and cleanerApp:ShownCategory() == "metal_bank")
     assert(h:App().queries:Get("1").name == "Bars")
     h.host:Unload("advancedbanksearch")
     h:Tick(2)
-    assert(cleanerApp:IsConnected() and layout.shownPage.key == "cleanup:metal_bank")
+    assert(cleanerApp:ShownCategory() == "metal_bank")
     assert(#h.host:SubscriptionsOf("advancedbanksearch") == 0)
 
     -- Once Bank Cleaner unloads, nothing of either remains in Core

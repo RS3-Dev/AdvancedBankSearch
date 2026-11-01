@@ -1,4 +1,4 @@
--- Add folder and saved-search entries to the Search tab's row menus
+-- Add folder and saved-search entries to the Search column's row menus
 -- The client places new entries unpredictably, so each is found and moved down
 -- A chosen entry runs next tick, only if its column and row still exist
 
@@ -129,14 +129,13 @@ local function pointer()
     return position.x * 100 / percent, position.y * 100 / percent
 end
 
--- Find the Search tab row beneath the pointer, with the mounted context it was found in
+-- Find the Search column row beneath the pointer, with the mounted context it was found in
 function QueryMenus:RowAtPointer()
     local tab = self.app.tab
     local ctx = tab.ctx
     if ctx == nil or not tab:IsMounted() then return nil end
-    local bounds = ctx:GetBounds()
     local pointerX, pointerY = pointer()
-    if type(bounds) ~= "table" or pointerX == nil then return nil end
+    if pointerX == nil then return nil end
     local left, top, current = 0, 0, ctx.parent
     for _ = 1, 32 do
         if current == nil then break end
@@ -144,7 +143,7 @@ function QueryMenus:RowAtPointer()
         current = current.parent
     end
     local x, y = math.floor(pointerX - left), math.floor(pointerY - top)
-    if x < 0 or y < 0 or x >= bounds.width or y >= bounds.height then return nil end
+    if x < 0 or y < 0 or x >= ctx.width or y >= ctx.height then return nil end
     return tab:EntryAt(x, y), ctx
 end
 
@@ -156,15 +155,15 @@ end
 -- Offer the folder or saved-search actions for the clicked row
 function QueryMenus:HandleMenu(menu)
     local app = self.app
-    local handle = app.handle
-    if handle == nil or handle:GetMenuItem(menu) ~= nil then return end
+    local ext = app.ext
+    if ext == nil or ext:GetMenuItem(menu) ~= nil then return end
     local entry, ctx = self:RowAtPointer()
     if entry == nil then return end
     local store, tab = app.queries, app.tab
     local exists = entry.kind == "folder" and function() return store:GetFolder(entry.id) ~= nil end
         or function() return store:Get(entry.id) ~= nil end
     local current = function()
-        return app.handle == handle and tab.ctx == ctx and type(ctx:GetBounds()) == "table" and exists()
+        return app.ext == ext and tab.ctx == ctx and tab:IsMounted() and exists()
     end
     local entries = {}
     -- Offer one action
