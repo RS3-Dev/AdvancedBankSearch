@@ -63,7 +63,7 @@ local width = controls.width
 assert(controls.status.hidden and controls.list.root.y == 40, tostring(controls.list.root.y))
 local fieldOptions = controls.field.options
 assert(fieldOptions.x == 8 and fieldOptions.y == 8 and fieldOptions.width == width - 32 and fieldOptions.height == 26)
-assert(fieldOptions.placeholder == "Search items with RuneQL..." and fieldOptions.maxLength == 9999)
+assert(fieldOptions.placeholder == "Search items..." and fieldOptions.maxLength == 9999)
 assert(Harness.Find(parent, "Saved searches") == nil)
 
 -- The sort button is a native host button with a centred swap icon

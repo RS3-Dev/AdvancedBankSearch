@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Query comparisons</title>
+<style>
+*{box-sizing:border-box}body{margin:0;color:var(--foreground,#e9e8e2);font:13px/1.5 var(--font-sans,system-ui,sans-serif)}table{border-collapse:collapse;width:100%;table-layout:fixed}caption{text-align:left;font-weight:600;font-size:16px;padding-bottom:12px}th,td{text-align:left;vertical-align:top;padding:11px 10px;border-bottom:1px solid var(--border,#3a3f3a);overflow-wrap:break-word}thead th{font-size:11px;font-weight:500;color:var(--muted-foreground,#aaa);padding-top:0;padding-bottom:8px}th:first-child,td:first-child{padding-left:0;width:24%}tbody th{font-weight:550}td{color:var(--foreground,#ddd)}tr:nth-child(even){background:color-mix(in srgb,var(--secondary,#29332c) 30%,transparent)}.note{font-size:12px;line-height:1.6;color:var(--muted-foreground,#aaa);margin:12px 0 0}.empty{color:var(--muted-foreground,#777)}@media(max-width:480px){body{font-size:11px}th,td{padding:9px 5px}th:first-child{width:25%}caption{font-size:15px}}
+</style>
+<table>
+<caption>Comparison menus</caption>
+<thead><tr><th scope="col">Field</th><th scope="col">Option 1</th><th scope="col">Option 2</th><th scope="col">Option 3</th><th scope="col">Option 4</th></tr></thead>
+<tbody>
+<tr><th scope="row">Item name</th><td>Has phrase</td><td>Has all words</td><td></td><td></td></tr>
+<tr><th scope="row">Quantity</th><td>Is</td><td>Is at least</td><td>Is at most</td><td>Is between</td></tr>
+<tr><th scope="row">GE price</th><td>Is</td><td>Is at least</td><td>Is at most</td><td>Is between</td></tr>
+<tr><th scope="row">Category</th><td>Is</td><td>Is not</td><td></td><td></td></tr>
+<tr><th scope="row">Skills</th><td>Includes</td><td>Does not include</td><td></td><td></td></tr>
+<tr><th scope="row">Types</th><td>Includes</td><td>Does not include</td><td></td><td></td></tr>
+<tr><th scope="row">Combat style</th><td>Includes</td><td>Does not include</td><td></td><td></td></tr>
+<tr><th scope="row">Slot</th><td>Includes</td><td>Does not include</td><td></td><td></td></tr>
+<tr><th scope="row">Tier</th><td>Is</td><td>Is at least</td><td>Is at most</td><td>Is between</td></tr>
+<tr><th scope="row">Tradeable</th><td>Is true</td><td>Is false</td><td></td><td></td></tr>
+<tr><th scope="row">Augmented</th><td>Is true</td><td>Is false</td><td></td><td></td></tr>
+</tbody>
+</table>
+<p class="note">Names keep both text comparisons because phrase order matters. Catalog selections use a positive or negative comparison instead.</p>
+<p class="note">“Is between” uses Low and High inputs. Boolean comparisons need no value input. For negative catalog comparisons, unknown data should stay unmatched.</p>
+</html>

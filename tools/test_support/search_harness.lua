@@ -32,7 +32,7 @@ function Harness.CoreRoot()
     end
     local contract = readText(root .. "/docs/API.md") or ""
     for _, needed in ipairs({ "bankcore.Register(spec)", "ext:SetPage(page)", "ext:Open()", "onBankClose",
-        "ext:GetBankItems()", "ext:GetMenuItem(menu)" }) do
+        "ext:GetBankItems()", "ext:GetMenuItem(menu)", "ext:GetBankState()", "onBankStateChanged(state)" }) do
         if not string.find(contract, needed, 1, true) then
             error("Bank Core at " .. root .. " lacks " .. needed .. " in its API reference; set BANKCORE_ROOT "
                 .. "to a checkout with the extension API Advanced Bank Search uses", 0)
@@ -78,10 +78,24 @@ function Harness.LoadTooltip(prettyRoot)
     config.Font = config.Font or {}
     local stubs = {
         ["src/core/sprites"] = { CONTENT_FRAME = {} },
-        ["src/core/math"] = assert(loadfile(prettyRoot .. "/src/core/math.lua"))(),
+    }
+    local env = setmetatable({ require = function(name)
+        if name == "src/core/math" then return assert(loadfile(prettyRoot .. "/src/core/math.lua"))() end
+        return assert(stubs[name], name)
+    end }, { __index = _G })
+    return assert(loadfile(prettyRoot .. "/src/tooltip.lua", "t", env))()
+end
+
+-- Load real button components for allocation and cleanup checks
+function Harness.LoadSimpleButton(prettyRoot)
+    local stubs = {
+        ["src/core/sprites"] = assert(loadfile(prettyRoot .. "/src/core/sprites.lua"))(),
+        ["src/core/cursor"] = { apply = function() end },
+        ["src/core/wheel"] = { bind = function() end },
+        ["src/tooltip"] = prettyui.Tooltip,
     }
     local env = setmetatable({ require = function(name) return assert(stubs[name], name) end }, { __index = _G })
-    return assert(loadfile(prettyRoot .. "/src/tooltip.lua", "t", env))()
+    return assert(loadfile(prettyRoot .. "/src/simple_button.lua", "t", env))()
 end
 
 -- Keep named hook subscriptions beside the unnamed one, as the client does
@@ -110,11 +124,65 @@ end
 
 -- Give the stand-in SimpleButton PrettyUI's SetActive
 function Harness.FollowPrettyUIControls()
+    -- Native text inputs cannot own child component collections
+    local newField, newLayer = prettyui.TextField.new, ui.Layer.new
+    prettyui.TextField.new = function(parent, options)
+        local field = newField(parent, options)
+        field.root.nativeTextInput = true
+        return field
+    end
+    ui.Layer.new = function(parent, ...)
+        if parent and parent.nativeTextInput then error("native inputs cannot parent layers") end
+        return newLayer(parent, ...)
+    end
+    local newWindow = prettyui.Window.new
+    prettyui.Window.new = function(parent, options)
+        local window = newWindow(parent, options)
+        window.content:SetSize(options.width - 16, options.height - 40)
+        function window:SetContentHeight(height) self.contentHeight = height end
+        return window
+    end
+    local newView = prettyui.SimpleView.new
+    prettyui.SimpleView.new = function(parent, options)
+        local view = newView(parent, options)
+        view.root:SetSize((options.width or 0) + (options.widthAnchor or 0) * parent.width,
+            (options.height or 0) + (options.heightAnchor or 0) * parent.height)
+        function view:SetContentHeight(height)
+            self.contentHeight = height
+            self.content.height = height
+        end
+        function view:SetScrollPosition(y) self.scrollY = y end
+        local cursor, controls = 0, {}
+        function view:AddText(value)
+            local options = type(value) == "table" and value or { text = value }
+            options.y, options.width, options.height = cursor, self.root.width, 24
+            local text = prettyui.Text.new(self.content, options)
+            controls[#controls + 1] = text
+            cursor = cursor + 30
+            return text
+        end
+        view.AddTitle = view.AddText
+        function view:AddComboBox(options)
+            options.y, options.width, options.height = cursor, self.root.width, 30
+            local combo = prettyui.ComboBox.new(self.content, options)
+            controls[#controls + 1] = combo
+            cursor = cursor + 38
+            return combo
+        end
+        local destroy = view.Destroy
+        function view:Destroy()
+            for _, control in ipairs(controls) do control:Destroy() end
+            destroy(self)
+            self.root:Destroy()
+        end
+        return view
+    end
     local newButton = prettyui.SimpleButton.new
     prettyui.SimpleButton.new = function(...)
         local button = newButton(...)
         button.active = false
         function button:SetActive(active) self.active = active == true end
+        function button:SetTooltip(value) self.tooltip = value end
         return button
     end
 end
@@ -215,12 +283,14 @@ function Harness.LoadComboBox(prettyRoot)
     id.Font.MUSEO_SANS_15PT_REGULAR = id.Font.MUSEO_SANS_15PT_REGULAR or 1
     local stubs = {
         ["src/core/control_palette"] = assert(loadfile(prettyRoot .. "/src/core/control_palette.lua"))(),
-        ["src/core/math"] = assert(loadfile(prettyRoot .. "/src/core/math.lua"))(),
         ["src/core/wheel"] = { bind = function() end },
         ["src/tooltip"] = prettyui.Tooltip,
         ["src/list"] = { new = newDropdownList },
     }
-    local env = setmetatable({ require = function(name) return assert(stubs[name], name) end }, { __index = _G })
+    local env = setmetatable({ require = function(name)
+        if name == "src/core/math" then return assert(loadfile(prettyRoot .. "/src/core/math.lua"))() end
+        return assert(stubs[name], name)
+    end }, { __index = _G })
     stubs["src/ordered_combo_box"] = assert(loadfile(prettyRoot .. "/src/ordered_combo_box.lua", "t", env))()
     return assert(loadfile(prettyRoot .. "/src/combo_box.lua", "t", env))()
 end
@@ -258,6 +328,11 @@ function Harness.new(name, options)
         "InventoryAdded", "InventoryRemoved", "InventoryUpdated" }) do
         Event[event] = { Subscribe = function() end, Unsubscribe = function() end }
     end
+    local settingsSubscriptions = {}
+    Event.SettingsLayerReady = {
+        Subscribe = function(key, action) settingsSubscriptions[key] = action end,
+        Unsubscribe = function(key) settingsSubscriptions[key] = nil end,
+    }
     -- Each plugin's MiniMenuReady handler, by subscription ID
     local menuSubscriptions = {}
     Event.MiniMenuReady = {
@@ -273,6 +348,21 @@ function Harness.new(name, options)
     local out = "dist/test/" .. name
     local built = Build.Run({ out = out })
     local Loader = require("tools/test_support/fake_plugin_host")
+    -- Older Core test hosts read `dependencies`. Adapt the documented manifest key
+    -- without changing Core or the plugin package.
+    if not Loader.searchManifestAdapter then
+        local readManifest = Loader.ReadManifest
+        Loader.ReadManifest = function(folder)
+            local manifest = readManifest(folder)
+            local Json = require("resources/core/json")
+            local file = assert(io.open(folder .. "/plugin.json", "rb"))
+            local source = Json.decode(file:read("a"))
+            file:close()
+            for name in pairs(source.requiredDependencies or {}) do manifest.dependencies[name] = true end
+            return manifest
+        end
+        Loader.searchManifestAdapter = true
+    end
     local logged = {}
     local globals = { ui = ui, id = id, Event = Event, config = config, Vector4 = Vector4,
         Mouse = Mouse, MiniMenuActionType = MiniMenuActionType, MiniMenuEntryType = MiniMenuEntryType,
@@ -283,6 +373,12 @@ function Harness.new(name, options)
     local host = Loader.new(globals, { exports = { prettyui = prettyui }, databases = databases,
         separateGlobals = options.separateGlobals, cloneExports = options.cloneExports,
         recordEvents = true })
+    -- Lifecycle tests deliberately inject dependency failures/reloads, including
+    -- required plugins the real client would prevent from unloading independently.
+    local notify = host.Notify
+    host.Notify = function(self, name, enabled, reinject, notifyRequired)
+        return notify(self, name, enabled, reinject, notifyRequired ~= false)
+    end
     return setmetatable({
         bankHost = bankHost,
         host = host,
@@ -290,6 +386,7 @@ function Harness.new(name, options)
         databases = databases,
         logged = logged,
         menuSubscriptions = menuSubscriptions,
+        settingsSubscriptions = settingsSubscriptions,
         coreRoot = coreRoot,
         out = out,
         coreFolder = coreRoot,

@@ -1,14 +1,15 @@
 -- Show RuneQL search and saved queries through Bank Core's API
--- RuneQL, GE Prices, and Bank Tags are read only while reported loaded
+-- RuneQL and GE Prices are read only while reported loaded
 
-local FolderDialog = require("advancedbanksearch/search/folder_dialog")
-local ItemFields = require("advancedbanksearch/search/item_fields")
-local QueryEditor = require("advancedbanksearch/search/query_editor")
-local QueryMenus = require("advancedbanksearch/search/query_menus")
-local QueryStore = require("advancedbanksearch/search/query_store")
-local Ranking = require("advancedbanksearch/search/ranking")
-local SearchTab = require("advancedbanksearch/search/search_tab")
-local TagSource = require("advancedbanksearch/search/tag_source")
+local FolderDialog = require("resources/search/folder_dialog")
+local ItemFields = require("resources/search/item_fields")
+local QueryBuilder = require("resources/search/query_builder")
+local QueryEditor = require("resources/search/query_editor")
+local QueryMenus = require("resources/search/query_menus")
+local QueryStore = require("resources/search/query_store")
+local Ranking = require("resources/search/ranking")
+local SearchTab = require("resources/search/search_tab")
+local Settings = require("resources/settings")
 
 local App = {}
 App.__index = App
@@ -19,8 +20,6 @@ local SEARCH_PAGE = "search"
 local QUERY_PAGE = "query"
 local PRICE_WAIT_EVENT = "advancedbanksearch_price_wait"
 local SEARCH_WAIT_EVENT = "advancedbanksearch_search_wait"
--- Ticks without typing before a search runs, 200 ms at 50 a second
-local SEARCH_WAIT_TICKS = 10
 -- Logic ticks between GE Prices checks, and before giving up
 local PRICE_CHECK_TICKS = 30
 local PRICE_WAIT_LIMIT = 1800
@@ -30,7 +29,21 @@ local PUBLISHED = { bankcore = "__bankcore_api", runeql = "__runeql_api", gepric
 local OPEN_REFUSALS = {
     not_all_items = 'Select "All Items" to view these search results.',
     preset_open = "Close the preset selector to view these search results.",
+    search_active = "Clear the bank search to view these search results.",
+    filter_active = "Clear the bank filter to view these search results.",
+    bank_closed = "Open your bank to view these search results.",
+    busy = "The bank is still updating. Try again.",
 }
+
+local function bankStateBlocker(state)
+    if state == nil then return "stale" end
+    if not state.bankOpen then return "bank_closed" end
+    if state.presetOpen then return "preset_open" end
+    if state.searchActive then return "search_active" end
+    if state.filterActive then return "filter_active" end
+    if not state.viewAll then return "not_all_items" end
+    return nil
+end
 
 local NEEDS_RUNEQL = "Searching needs RuneQL. Enable RuneQL to search your bank."
 
@@ -58,11 +71,13 @@ end
 
 -- Load saved queries and build the column, before connecting
 function App.new()
+    QueryBuilder.SetCatalog(findDependency(runeql, "runeql", "Compile"))
     local app = setmetatable({
         queries = QueryStore.new(),
+        settings = Settings.new(),
         -- Whether each optional dependency was last reported loaded
         -- A plugin's globals can stick around after it unloads
-        enabled = { runeql = true, geprices = true, banktags = true },
+        enabled = { runeql = true, geprices = true },
         ext = nil,
         -- The last bank read, kept while Bank Core is busy
         items = nil,
@@ -90,8 +105,13 @@ function App.new()
     }, App)
     app.tab = SearchTab.new(app)
     app.menus = QueryMenus.new(app)
-    -- The import source Bank Tags lists while it is loaded
-    app.tagSource = TagSource.new(app)
+    app.settings.onChange = function(key)
+        if key == "includePlaceholders" and app:ShownPage() == SEARCH_PAGE then app:RefreshPage() end
+        if key == "searchDelayTicks" and app.searchWait ~= nil then
+            app:StopSearchWait()
+            app:QueueText(app.draft)
+        end
+    end
     if app.queries.loadError ~= nil then app:ShowStatus(app.queries.loadError, true) end
     return app
 end
@@ -112,8 +132,8 @@ end
 function App:Start()
     if self.shutDown or self.started then return end
     self.started = true
+    self.settings:Start()
     self:Connect()
-    self.tagSource:Connect()
 end
 
 -- Report whether this plugin is registered with Bank Core
@@ -133,11 +153,12 @@ function App:Connect()
         onClose = function() self:OnClose() end,
         onBankItems = function() self:OnBankItems() end,
         onBankClose = function() self:OnBankClose() end,
+        onBankStateChanged = function(state) self:OnBankStateChanged(state) end,
     })
     if ext == nil then return false, reason end
     self.ext = ext
+    self:OnBankStateChanged(ext:GetBankState())
     self.menus:Start()
-    self.tagSource:Update()
     return true
 end
 
@@ -150,8 +171,9 @@ function App:Disconnect()
     self:CloseFolderDialog()
     local ext = self.ext
     self.ext, self.items, self.pageID = nil, nil, nil
+    if self.status == self.bankStateError then self:ShowStatus(nil) end
+    self.bankStateError = nil
     if ext ~= nil then ext:Dispose() end
-    self.tagSource:Update()
 end
 
 -- Follow a dependency loading or unloading
@@ -159,6 +181,8 @@ function App:DependencyChanged(name, enabled)
     if self.enabled[name] == nil then return end
     self.enabled[name] = enabled == true
     if name == "runeql" then
+        self:CloseEditor()
+        QueryBuilder.SetCatalog(self:RuneQL())
         if not enabled and self.ext ~= nil then self.ext:Close() end
         if not enabled then
             self:StopSearchWait()
@@ -170,10 +194,7 @@ function App:DependencyChanged(name, enabled)
         self:StopPriceWait()
         self.pricesFailed = false
         self:RefreshPage()
-    elseif name == "banktags" then
-        if enabled then self.tagSource:Connect() else self.tagSource:Disconnect() end
     end
-    self.tagSource:Update()
     self:Refresh()
 end
 
@@ -187,6 +208,32 @@ end
 function App:OnClose()
     self:StopPriceWait()
     self:Refresh()
+end
+
+-- Retire results and pending work when native bank controls restrict the view.
+-- Core may already have closed the page before delivering the state callback.
+function App:OnBankStateChanged(state)
+    if self.ext == nil then return "stale" end
+    local blocked = bankStateBlocker(state)
+    if blocked ~= nil then
+        local hadResults = self.pageID ~= nil or self.searchWait ~= nil
+        self:StopSearchWait()
+        self:StopPriceWait()
+        if self.ext:IsOpen() then self.ext:Close() end
+        self.pageID = nil
+        if hadResults then self:ShowBankStateError(blocked) end
+    elseif self.bankStateError ~= nil then
+        if self.status == self.bankStateError then self:ShowStatus(nil) end
+        self.bankStateError = nil
+    end
+    self:Refresh()
+    return blocked
+end
+
+function App:ShowBankStateError(reason)
+    self.bankStateError = OPEN_REFUSALS[reason]
+        or ("The bank cannot show results now (" .. tostring(reason) .. ").")
+    self:ShowStatus(self.bankStateError, true)
 end
 
 -- Rank the last page again for the bank's new items
@@ -247,7 +294,7 @@ end
 -- Describe the search or saved-query page and its outcome
 -- Prices that gave up waiting say so
 function App:BuildPage(pageID)
-    local title, text, excludePlaceholders = "Search", self.text, false
+    local title, text, excludePlaceholders = "Search", self.text, not self.settings.values.includePlaceholders
     local record = nil
     if pageID == QUERY_PAGE then
         record = self.queries:Get(self.pageQuery)
@@ -282,6 +329,12 @@ end
 -- Show a new search or saved query: set its page, then open it
 -- A refusal goes to the column's status line
 function App:ShowPage(pageID)
+    if self.ext == nil then return false end
+    local blocked = self:OnBankStateChanged(self.ext:GetBankState())
+    if blocked ~= nil then
+        self:ShowBankStateError(blocked)
+        return false, blocked
+    end
     self:StopPriceWait()
     self.pricesFailed = false
     local set, outcome = self:SetPage(pageID)
@@ -290,7 +343,7 @@ function App:ShowPage(pageID)
     if opened then
         self:FollowOutcome(outcome)
     else
-        self:ShowStatus(OPEN_REFUSALS[reason] or ("The bank cannot show results now (" .. tostring(reason) .. ")."), true)
+        self:ShowBankStateError(reason)
     end
     return opened, reason
 end
@@ -349,7 +402,7 @@ function App:ChooseQuery(queryID)
     return opened
 end
 
--- Search typed text once typing pauses for SEARCH_WAIT_TICKS
+-- Search once typing pauses for the preferred delay
 -- Short text and searches that can't run take effect at once
 function App:QueueText(text)
     self.draft = tostring(text or "")
@@ -367,7 +420,7 @@ function App:QueueText(text)
     Event.Logic.Subscribe(SEARCH_WAIT_EVENT, function()
         if self.searchWait ~= wait then return end
         wait.ticks = wait.ticks + 1
-        if wait.ticks >= SEARCH_WAIT_TICKS then self:SetText(self.draft) end
+        if wait.ticks >= self.settings.values.searchDelayTicks then self:SetText(self.draft) end
     end)
 end
 
@@ -462,10 +515,13 @@ function App:OpenEditor(record)
     self:CloseFolderDialog()
     local parent = windowParent()
     if parent == nil then return false end
+    local engine = self:RuneQL()
     local editor
     editor = QueryEditor.new(parent, {
         record = record,
-        blocked = self:RuneQL() == nil and NEEDS_RUNEQL or nil,
+        defaultMode = self.settings.values.editorMode,
+        catalog = engine and engine.Catalog,
+        blocked = engine == nil and NEEDS_RUNEQL or nil,
         onSave = function(queryID, name, query, builder)
             return self:SaveQuery(queryID, name, query, builder)
         end,
@@ -605,8 +661,8 @@ end
 function App:Shutdown()
     if self.shutDown then return end
     self.shutDown = true
+    self.settings:Shutdown()
     pcall(function() self:Disconnect() end)
-    pcall(function() self.tagSource:Disconnect() end)
 end
 
 return App

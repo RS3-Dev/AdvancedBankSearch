@@ -17,19 +17,20 @@ local function source(name)
 end
 for name, methods in pairs({
     combo_box = { "ComboBox:SetEntries(entries, selectedID)", "ComboBox:Select(entryID, triggerEvents)" },
-    simple_button = { "SimpleButton:SetActive(active)", "SimpleButton:SetDisabled(disabled)" },
+    simple_button = { "SimpleButton:SetActive(active)", "SimpleButton:SetDisabled(disabled)", "SimpleButton:SetTooltip(value)" },
     text_field = { "TextField:GetText()", "TextField:SetText(value, triggerCallback)", "TextField:SetPlaceholder(value)" },
 }) do
     for _, method in ipairs(methods) do
         assert(string.find(source(name), "function " .. method, 1, true), name .. " lacks " .. method)
     end
 end
-local editorFile = assert(io.open("advancedbanksearch/search/query_editor.lua", "rb"))
+local editorFile = assert(io.open("resources/search/query_editor.lua", "rb"))
 local editorSource = editorFile:read("a")
 editorFile:close()
 assert(not string.find(editorSource, "SetSelected", 1, true))
 
 local h = Harness.new("query_editor")
+prettyui.SimpleButton = Harness.LoadSimpleButton(prettyRoot)
 h:NameObjects({ { 101, "Iron bar" }, { 102, "Iron ore" }, { 103, "Rune bar" }, { 104, "Lobster" } })
 h.bankHost:SetItems({ { 101, 5 }, { 102, 40 }, { 103, 2 }, { 104, 12 } })
 h:LoadCore()
@@ -40,6 +41,44 @@ h:OpenBank()
 h:Tick(2)
 local controls = app.tab.controls
 assert(controls ~= nil, "the Search tab did not mount: " .. tostring(h:LoggedFailure()))
+
+-- Count live components including overlays beside the editor
+local function liveNodes(node)
+    if node.destroyed then return 0 end
+    local count = 1
+    for _, child in ipairs(node.children or {}) do count = count + liveNodes(child) end
+    return count
+end
+
+-- Constructor callbacks and failures must not leave an orphan window
+local baselineNodes = liveNodes(h.bankHost.window.host)
+local windowFactory, comboFactory, fieldFactory = prettyui.Window.new, prettyui.ComboBox.new, prettyui.TextField.new
+local partialWindow, staleCallbacks, fieldCount = nil, {}, 0
+prettyui.Window.new = function(parent, options)
+    partialWindow = windowFactory(parent, options)
+    return partialWindow
+end
+prettyui.ComboBox.new = function(parent, options)
+    local box = comboFactory(parent, options)
+    if options.onChange then options.onChange(box, options.selectedID) end
+    return box
+end
+prettyui.TextField.new = function(parent, options)
+    local field = fieldFactory(parent, options)
+    if options.onChange then
+        staleCallbacks[#staleCallbacks + 1] = function() options.onChange(field, "change", "constructor echo") end
+        staleCallbacks[#staleCallbacks]()
+    end
+    fieldCount = fieldCount + 1
+    if fieldCount == 4 then error("injected native construction failure") end
+    return field
+end
+local opened, failure = pcall(function() app:NewQuery() end)
+assert(not opened and tostring(failure):find("injected native construction failure", 1, true))
+assert(app.editor == nil and partialWindow.root.destroyed)
+for _, callback in ipairs(staleCallbacks) do callback() end
+assert(liveNodes(h.bankHost.window.host) == baselineNodes, "failed editor leaked components")
+prettyui.Window.new, prettyui.ComboBox.new, prettyui.TextField.new = windowFactory, comboFactory, fieldFactory
 
 -- Press a PrettyUI button
 local function press(button)
@@ -57,28 +96,19 @@ end
 -- Choose a combo box entry by its label as a player does
 -- Opening lists the entries, and clicking one reports that row's ID
 local function choose(box, label)
-    box.input.hooks[ui.Hook.ONCLICK]()
-    assert(box.open and not box.dropdown.root.hidden)
-    for _, entry in ipairs(box.dropdown.rows) do
-        if entry.label == label then
-            box.dropdown:Click(entry.id)
-            assert(not box.open and box.input.content == label)
-            return
-        end
-    end
-    error("no combo entry " .. label)
+    assert(box.dropdown == nil, "editor dropdown should use the native control")
+    box.root:Click(label)
+    assert(box:GetSelectedLabel() == label)
 end
 
--- List a combo box's entries in the order its dropdown shows them
+-- List the labels native clients sort
 local function labels(box)
-    local listed = {}
-    for index, entry in ipairs(box.dropdown.rows) do listed[index] = entry.label end
-    return table.concat(listed, ",")
+    return table.concat(box.root.labels, ",")
 end
 
 -- Return the label a combo box shows
 local function shown(box)
-    return box.input.content
+    return box:GetSelectedLabel()
 end
 
 -- Return the open editor's condition row
@@ -100,6 +130,20 @@ local function shownRows()
     return count
 end
 
+-- Repeated close and reopen must release controls and overlays
+for _ = 1, 20 do
+    app:NewQuery()
+    local closing = app.editor
+    choose(closing.slots[1].fieldBox, "Category")
+    enter(closing.slots[1].valueField, "bird")
+    assert(liveNodes(h.bankHost.window.host) < 4096, "editor exceeds the component budget")
+    local staleEdit = closing.slots[1].valueField.options.onChange
+    closing.window:Close()
+    assert(app.editor == nil and closing.destroyed)
+    staleEdit(nil, "change", "after close")
+    assert(liveNodes(h.bankHost.window.host) == baselineNodes, "closed editor leaked components")
+end
+
 -- List the object IDs a saved query matches
 local function matched(queryID)
     local outcome = app:Run(app.queries:Get(queryID).query, true)
@@ -117,11 +161,19 @@ local editor = app.editor
 assert(editor.mode == "visual" and editor.visualButton.active and not editor.advancedButton.active)
 assert(shownRows() == 1 and row(1).removeButton.disabled and not editor.addButton.disabled)
 assert(not visible(editor.queryField) and not visible(editor.characterCount) and visible(editor.preview))
-assert(row(1).fieldBox:GetSelectedID() == 1 and row(1).operatorBox:GetSelectedID() == 1)
--- Lists keep the builder's order, not the alphabetical one, and show the draft's choice
-assert(labels(row(1).fieldBox) == "Item name,Quantity,GE price,GE high price,GE low price")
+assert(editor.cancelButton.root.parent == editor.footer.root and editor.saveButton.root.parent == editor.footer.root)
+assert(editor.footer.root.parent == editor.window.content and editor.footer.root.y == -editor.footer.root.height)
+assert(editor.body.root.parent == editor.window.content and editor.content ~= editor.window.content)
+local footerY, cancelY, saveY = editor.footer.root.y, editor.cancelButton.root.y, editor.saveButton.root.y
 assert(shown(row(1).fieldBox) == "Item name" and shown(row(1).operatorBox) == "has phrase")
-assert(labels(row(1).operatorBox) == "has phrase,has all words")
+-- Native labels and IDs share alphabetical order and show the draft's choice
+local expectedFields = { "Item name", "Quantity", "GE price", "Category", "Skills", "Types",
+    "Combat style", "Slot", "Tier", "Tradeable", "Augmented" }
+table.sort(expectedFields)
+assert(labels(row(1).fieldBox) == table.concat(expectedFields, ","))
+assert(#editor.fields == 11)
+assert(shown(row(1).fieldBox) == "Item name" and shown(row(1).operatorBox) == "has phrase")
+assert(labels(row(1).operatorBox) == "has all words,has phrase")
 assert(labels(editor.matchBox) == "all conditions (AND),any condition (OR)")
 -- PrettyUI's native box, used without an order, shows and reports sorted positions
 local nativeID
@@ -137,31 +189,31 @@ native:Destroy()
 -- Switching between name and number fields takes effect at once, every time
 for _ = 1, 2 do
     enter(row(1).valueField, "iron")
-    choose(row(1).fieldBox, "GE high price")
+    choose(row(1).fieldBox, "GE price")
     local rule = editor.draft.rules[1]
-    assert(rule.field == "gehigh" and rule.operator == "equals" and rule.value == "")
-    assert(shown(row(1).fieldBox) == "GE high price" and shown(row(1).operatorBox) == "is")
-    assert(labels(row(1).operatorBox) == "is,is greater than,is less than,is between")
+    assert(rule.field == "price" and rule.operator == "equals" and rule.value == "")
+    assert(shown(row(1).fieldBox) == "GE price" and shown(row(1).operatorBox) == "is")
+    assert(labels(row(1).operatorBox) == "is,is at least,is at most,is between")
     assert(row(1).valueField:GetText() == "" and row(1).valueField.placeholder == "Number")
-    assert(editor.preview.content == "Condition 1: enter a whole number like 500, 25k, or 1.5m.")
-    choose(row(1).operatorBox, "is greater than")
+    assert(editor.preview.content == "")
+    choose(row(1).operatorBox, "is at least")
     enter(row(1).valueField, "5k")
-    assert(editor.preview.content == "RuneQL: gehigh:[5000 TO *]", editor.preview.content)
+    assert(editor.preview.content == "price:[5000 TO *]", editor.preview.content)
     -- Another number field keeps the comparison and number
-    choose(row(1).fieldBox, "GE low price")
-    assert(editor.draft.rules[1].operator == "atleast" and shown(row(1).operatorBox) == "is greater than")
-    assert(row(1).valueField:GetText() == "5k" and editor.preview.content == "RuneQL: gelow:[5000 TO *]")
+    choose(row(1).fieldBox, "Quantity")
+    assert(editor.draft.rules[1].operator == "atleast" and shown(row(1).operatorBox) == "is at least")
+    assert(row(1).valueField:GetText() == "5k" and editor.preview.content == "qty:[5000 TO *]")
     choose(row(1).operatorBox, "is between")
     assert(visible(row(1).minField) and not visible(row(1).valueField))
     choose(row(1).fieldBox, "Item name")
     rule = editor.draft.rules[1]
     assert(rule.field == "name" and rule.operator == "phrase" and rule.value == "")
     assert(shown(row(1).fieldBox) == "Item name" and shown(row(1).operatorBox) == "has phrase")
-    assert(labels(row(1).operatorBox) == "has phrase,has all words")
+    assert(labels(row(1).operatorBox) == "has all words,has phrase")
     assert(visible(row(1).valueField) and not visible(row(1).minField) and not visible(row(1).andText))
 end
-assert(#row(1).operatorBox.entries == 2 and visible(row(1).valueField) and not visible(row(1).minField))
-assert(editor.preview.content == "Condition 1: enter words from the item name.", editor.preview.content)
+assert(#row(1).operatorBox.root.labels == 2 and visible(row(1).valueField) and not visible(row(1).minField))
+assert(editor.preview.content == "", editor.preview.content)
 -- An incomplete condition is refused with its reason and nothing saves
 enter(editor.nameField, "Iron stock")
 press(editor.saveButton)
@@ -170,59 +222,59 @@ assert(#app.queries:All() == 0)
 
 -- Typing a name updates the preview and clears the message
 enter(row(1).valueField, 'iron "bar"')
-assert(editor.preview.content == 'RuneQL: name:"iron \\"bar\\""' and editor.status.hidden, editor.preview.content)
+assert(editor.preview.content == 'name:"iron \\"bar\\""' and editor.status.hidden, editor.preview.content)
 choose(row(1).operatorBox, "has all words")
-assert(editor.preview.content == 'RuneQL: (name:"iron" AND name:"\\"bar\\"")', editor.preview.content)
+assert(editor.preview.content == '(name:"iron" AND name:"\\"bar\\"")', editor.preview.content)
 enter(row(1).valueField, "iron")
 
 -- Adding a condition shows a row; a quantity offers number comparisons
 press(editor.addButton)
-assert(shownRows() == 2 and not row(1).removeButton.disabled and row(2).fieldBox:GetSelectedID() == 1)
+assert(shownRows() == 2 and not row(1).removeButton.disabled and shown(row(2).fieldBox) == "Item name")
 choose(row(2).fieldBox, "Quantity")
-assert(editor.draft.rules[2].field == "qty" and #row(2).operatorBox.entries == 4)
-assert(row(2).operatorBox:GetSelectedID() == 1 and row(2).valueField.placeholder == "Number")
+assert(editor.draft.rules[2].field == "qty" and #row(2).operatorBox.root.labels == 4)
+assert(shown(row(2).operatorBox) == "is" and row(2).valueField.placeholder == "Number")
 enter(row(2).valueField, "lots")
-assert(editor.preview.content == "Condition 2: enter a whole number like 500, 25k, or 1.5m.", editor.preview.content)
+assert(editor.preview.content == "", editor.preview.content)
 -- Between shows two bounds and checks their order
 choose(row(2).operatorBox, "is between")
 assert(not visible(row(2).valueField) and visible(row(2).minField) and visible(row(2).maxField))
 assert(visible(row(2).andText))
 enter(row(2).minField, "10")
 enter(row(2).maxField, "5")
-assert(editor.preview.content == "Condition 2: the first number must not be more than the second.")
+assert(editor.preview.content == "")
 enter(row(2).maxField, "1k")
-assert(editor.preview.content == 'RuneQL: name:"iron" AND qty:[10 TO 1000]', editor.preview.content)
+assert(editor.preview.content == 'name:"iron" AND qty:[10 TO 1000]', editor.preview.content)
 -- Matching any joins with OR
 choose(editor.matchBox, "any condition (OR)")
-assert(editor.preview.content == 'RuneQL: name:"iron" OR qty:[10 TO 1000]', editor.preview.content)
+assert(editor.preview.content == 'name:"iron" OR qty:[10 TO 1000]', editor.preview.content)
 choose(editor.matchBox, "all conditions (AND)")
 
 -- At most six conditions; removing one moves the rest up
 for _ = 3, 6 do press(editor.addButton) end
 assert(shownRows() == 6 and editor.addButton.disabled)
 choose(row(3).fieldBox, "GE price")
-choose(row(3).operatorBox, "is less than")
+choose(row(3).operatorBox, "is at most")
 enter(row(3).valueField, "1.5m")
 press(row(2).removeButton)
 assert(shownRows() == 5 and not editor.addButton.disabled)
-assert(row(2).fieldBox:GetSelectedID() == 3 and row(2).operatorBox:GetSelectedID() == 3)
+assert(shown(row(2).fieldBox) == "GE price" and shown(row(2).operatorBox) == "is at most")
 assert(row(2).valueField:GetText() == "1.5m" and not visible(row(2).minField))
-assert(shown(row(2).fieldBox) == "GE price" and shown(row(2).operatorBox) == "is less than")
+assert(shown(row(2).fieldBox) == "GE price" and shown(row(2).operatorBox) == "is at most")
 assert(shown(row(3).fieldBox) == "Item name" and shown(row(3).operatorBox) == "has phrase")
 -- A field of the same kind keeps its comparison and number
 choose(row(2).fieldBox, "Quantity")
 assert(editor.draft.rules[2].operator == "atmost" and editor.draft.rules[2].value == "1.5m")
-assert(shown(row(2).fieldBox) == "Quantity" and shown(row(2).operatorBox) == "is less than")
+assert(shown(row(2).fieldBox) == "Quantity" and shown(row(2).operatorBox) == "is at most")
 for _ = 1, 3 do press(row(3).removeButton) end
 assert(shownRows() == 2 and not visible(row(3).fieldBox) and not visible(row(3).removeButton))
 -- Choosing a name field again starts that condition over
 choose(row(2).fieldBox, "Item name")
 assert(editor.draft.rules[2].operator == "phrase" and editor.draft.rules[2].value == "")
-assert(#row(2).operatorBox.entries == 2 and row(2).valueField:GetText() == "")
+assert(#row(2).operatorBox.root.labels == 2 and row(2).valueField:GetText() == "")
 choose(row(2).fieldBox, "Quantity")
-choose(row(2).operatorBox, "is greater than")
+choose(row(2).operatorBox, "is at least")
 enter(row(2).valueField, "10")
-assert(editor.preview.content == 'RuneQL: name:"iron" AND qty:[10 TO *]', editor.preview.content)
+assert(editor.preview.content == 'name:"iron" AND qty:[10 TO *]', editor.preview.content)
 
 -- Saving runs the same save as typed RuneQL, with the conditions kept
 press(editor.saveButton)
@@ -238,11 +290,11 @@ assert(string.find(h.databases.advancedbanksearch["advancedbanksearch:queries:v1
 press(controls.edit)
 editor = app.editor
 assert(editor.queryID == "1" and editor.mode == "visual" and shownRows() == 2)
-assert(row(1).valueField:GetText() == "iron" and row(2).fieldBox:GetSelectedID() == 2)
-assert(row(2).operatorBox:GetSelectedID() == 2 and row(2).valueField:GetText() == "10")
-assert(shown(row(2).fieldBox) == "Quantity" and shown(row(2).operatorBox) == "is greater than")
-assert(labels(row(2).operatorBox) == "is,is greater than,is less than,is between")
-assert(editor.preview.content == "RuneQL: " .. record.query)
+assert(row(1).valueField:GetText() == "iron" and shown(row(2).fieldBox) == "Quantity")
+assert(shown(row(2).operatorBox) == "is at least" and row(2).valueField:GetText() == "10")
+assert(shown(row(2).fieldBox) == "Quantity" and shown(row(2).operatorBox) == "is at least")
+assert(labels(row(2).operatorBox) == "is,is at least,is at most,is between")
+assert(editor.preview.content == record.query)
 -- Advanced shows the text the conditions give, and Visual comes back without asking
 press(editor.advancedButton)
 assert(editor.mode == "advanced" and editor.queryField:GetText() == record.query and visible(editor.queryField))
@@ -250,7 +302,7 @@ assert(not visible(editor.preview) and not visible(row(1).fieldBox) and editor.a
 assert(editor.characterCount.content == #record.query .. " / 9999")
 press(editor.visualButton)
 assert(editor.mode == "visual" and editor.status.hidden and shownRows() == 2)
-assert(shown(row(1).fieldBox) == "Item name" and shown(row(2).operatorBox) == "is greater than")
+assert(shown(row(1).fieldBox) == "Item name" and shown(row(2).operatorBox) == "is at least")
 -- Saving unchanged text from Advanced keeps the conditions
 press(editor.advancedButton)
 press(editor.saveButton)
@@ -323,14 +375,94 @@ assert(#app.queries:All() == 2)
 enter(row(1).valueField, "lobster ")
 assert(editor.status.hidden)
 
+-- Catalog conditions save and reopen with their controls -------------------------------
+
+editor.window:Close()
+press(controls.new)
+editor = app.editor
+enter(editor.nameField, "Catalog equipment")
+choose(row(1).fieldBox, "Combat style")
+enter(row(1).valueField, "hybrid")
+assert(#editor.pickerValues == 1)
+press(editor.pickerButtons[1])
+assert(editor.draft.rules[1].value == "hybrid" and editor.pickerIndex == nil)
+-- Clear belongs inside the input; row removal stays outside it
+local clearRoot, inputRoot = row(1).clearButton.root, row(1).valueField.root
+assert(clearRoot.parent == inputRoot.parent and clearRoot.y == inputRoot.y)
+assert(clearRoot.x >= inputRoot.x and clearRoot.x + clearRoot.width <= inputRoot.x + inputRoot.width)
+assert(row(1).removeButton.root.parent == editor.content)
+-- A delayed native content echo must not reopen the selected value
+enter(row(1).valueField, "hybrid")
+local valueClick = row(1).valueField.root.hooks[ui.Hook.ONCLICK]
+valueClick()
+assert(editor.pickerIndex == nil)
+for _, button in ipairs(editor.pickerButtons) do assert(not visible(button)) end
+-- Clearing still reopens all available options
+press(row(1).clearButton)
+assert(editor.pickerIndex == 1 and #editor.pickerValues == #app:RuneQL().Catalog.Values("combatStyle"))
+choose(row(1).fieldBox, "Category")
+assert(row(1).valueField.placeholder == "Choose a value")
+assert(editor.pickerIndex == 1 and #editor.pickerValues == #app:RuneQL().Catalog.Categories())
+assert(visible(editor.pickerNext) and editor.pickerPrevious.disabled)
+local firstPage = editor.pickerButtons[1].content.content
+press(editor.pickerNext)
+assert(editor.pickerPage == 2 and editor.pickerButtons[1].content.content ~= firstPage)
+-- Pickers show labels and persist canonical values
+local selectedValue = editor.pickerValues[25].value
+press(editor.pickerButtons[1])
+assert(editor.draft.rules[1].value == selectedValue and editor.pickerIndex == nil)
+assert(row(1).valueField:GetText() == selectedValue and visible(row(1).clearButton))
+press(row(1).clearButton)
+assert(editor.pickerIndex == 1 and row(1).valueField:GetText() == "")
+assert(editor.pickerPage == 1 and not visible(row(1).clearButton))
+enter(row(1).valueField, "wood-production")
+assert(#editor.pickerValues == 1 and editor.pickerValues[1].label == "Woodcutting, Firemaking & Fletching materials")
+local valueRoot = row(1).valueField.root
+press(editor.pickerButtons[1])
+assert(row(1).valueField.root == valueRoot and row(1).valueField:GetText() == "wood-production")
+assert(editor.pickerIndex == nil)
+enter(row(1).valueField, "melee-equipment")
+press(editor.addButton)
+choose(row(2).fieldBox, "Tier")
+choose(row(2).operatorBox, "is between")
+enter(row(2).minField, "80")
+enter(row(2).maxField, "90")
+press(editor.addButton)
+choose(row(3).fieldBox, "Augmented")
+assert(labels(row(3).operatorBox) == "is false,is true")
+assert(not visible(row(3).valueField) and not visible(row(3).minField) and not visible(row(3).maxField))
+choose(row(3).operatorBox, "is false")
+assert(editor.preview.content == 'category:["melee-equipment" TO "melee-equipment"] AND tier:[80 TO 90] AND augmented:false')
+press(editor.saveButton)
+local catalogQuery = app.queries:All()[3]
+app:EditQuery(catalogQuery.id)
+editor = app.editor
+assert(editor.mode == "visual" and shown(row(1).fieldBox) == "Category")
+assert(shown(row(2).operatorBox) == "is between" and row(2).maxField:GetText() == "90")
+assert(shown(row(3).operatorBox) == "is false" and not visible(row(3).valueField))
+-- Changing away from a flag restores the value input
+choose(row(3).fieldBox, "Tier")
+assert(visible(row(3).valueField) and shown(row(3).operatorBox) == "is")
+enter(row(3).valueField, "25k")
+choose(row(3).fieldBox, "Skills")
+assert(visible(row(3).valueField) and row(3).valueField:GetText() == "")
+assert(editor.pickerIndex == 3 and #editor.pickerValues == #app:RuneQL().Catalog.Values("skills"))
+assert(not visible(editor.pickerNext))
+assert(editor.body.contentHeight > row(3).fieldBox.root.y)
+editor.body:SetScrollPosition(100)
+assert(editor.footer.root.y == footerY and editor.cancelButton.root.y == cancelY and editor.saveButton.root.y == saveY)
+enter(row(3).valueField, "archaeology")
+assert(editor.preview.content:find('skills:["archaeology" TO "archaeology"]', 1, true))
+
 -- Closing and reloading ----------------------------------------------------------------
 
 -- Closing destroys every control the editor made
 local window, slot = editor.window, row(1)
-local fieldRoot, fieldList = slot.fieldBox.root, slot.fieldBox.dropdown.root
+local fieldRoot = slot.fieldBox.root
+local saveRoot = editor.saveButton.root
 app:CloseEditor()
-assert(app.editor == nil and window.root.destroyed and fieldRoot.destroyed and fieldList.destroyed)
-assert(slot.maxField.root.destroyed and editor.saveButton.root.destroyed and editor.queryField.root.destroyed)
+assert(app.editor == nil and window.root.destroyed and fieldRoot.destroyed)
+assert(slot.maxField.root.destroyed and saveRoot.destroyed and editor.queryField.root.destroyed)
 assert(#editor.owned == 0 and editor.window == nil)
 -- Unloading the plugin closes an open editor
 press(controls.new)
@@ -342,6 +474,83 @@ h:LoadSearch()
 app = h:App()
 h:Tick(2)
 assert(app.queries:Get("1").builder == nil and app.queries:Get("2").builder.rules[1].value == "rune bar")
+app:EditQuery(catalogQuery.id)
+assert(app.editor.mode == "visual" and app.editor.draft.rules[3].operator == "false")
+assert(app.editor.slots[3].valueField.root.hidden)
+-- A missing dependency preserves builders, then restores Visual on load
+h.host:Unload("runeql")
+assert(app.editor == nil)
+h.host:Unload("advancedbanksearch")
+h:LoadSearch()
+app = h:App()
+assert(app.queries:Get(catalogQuery.id).builder.rules[1].field == "category")
+h:LoadRuneQL()
+app:EditQuery(catalogQuery.id)
+assert(app.editor.mode == "visual" and app.editor.pickerIndex == nil)
+assert(app.editor.draft.rules[1].value == "melee-equipment")
+-- Discover a new field and its values without editing this plugin
+local engine = app:RuneQL()
+local fieldsOf, valuesOf = engine.Catalog.Fields, engine.Catalog.Values
+engine.Catalog.Fields = function()
+    local fields = fieldsOf()
+    for _, field in ipairs(fields) do if field.key == "skills" then field.label = "Skills from RuneQL" end end
+    fields[#fields + 1] = { key = "newCatalogField", label = "New catalog field", type = "text", multiple = true }
+    return fields
+end
+engine.Catalog.Values = function(key, options)
+    if key == "skills" then return { { value = "rune-supplies", label = "Rune supplies" } }, 1 end
+    return valuesOf(key, options)
+end
+app:DependencyChanged("runeql", true)
+app:NewQuery()
+editor = app.editor
+assert(not labels(row(1).fieldBox):find("New catalog field", 1, true))
+choose(row(1).fieldBox, "Skills from RuneQL")
+assert(editor.pickerIndex == 1 and editor.pickerButtons[1].content.content == "Rune supplies")
+press(editor.pickerButtons[1])
+assert(editor.draft.rules[1].field == "skills" and editor.draft.rules[1].value == "rune-supplies")
+assert(editor.preview.content == 'skills:["rune-supplies" TO "rune-supplies"]')
+engine.Catalog.Fields, engine.Catalog.Values = fieldsOf, valuesOf
+app:DependencyChanged("runeql", true)
+-- Existing searches keep access to fields removed from the default menu
+local doseBuilder = { match = "all", rules = { { field = "dose", operator = "equals", value = 3 } } }
+assert(app:SaveQuery(nil, "Existing doses", "dose:[3 TO 3]", doseBuilder))
+app:EditQuery(app.selectedQuery)
+assert(app.editor.mode == "visual" and app.editor.draft.rules[1].field == "dose")
+assert(shown(row(1).fieldBox) == "Dose" and app.editor.preview.content == "dose:[3 TO 3]")
+app:NewQuery()
+assert(#app.editor.fields == 11 and not labels(row(1).fieldBox):find("Dose", 1, true))
+local menus = {
+    ["Item name"] = "has all words,has phrase",
+    ["Category"] = "is,is not",
+    ["Skills"] = "does not include,includes",
+    ["Types"] = "does not include,includes",
+    ["Combat style"] = "does not include,includes",
+    ["Slot"] = "does not include,includes",
+    ["Quantity"] = "is,is at least,is at most,is between",
+    ["GE price"] = "is,is at least,is at most,is between",
+    ["Tier"] = "is,is at least,is at most,is between",
+    ["Tradeable"] = "is false,is true",
+    ["Augmented"] = "is false,is true",
+}
+for field, comparisons in pairs(menus) do
+    choose(row(1).fieldBox, field)
+    assert(labels(row(1).operatorBox) == comparisons, field .. ": " .. labels(row(1).operatorBox))
+end
+choose(row(1).fieldBox, "Skills")
+choose(row(1).operatorBox, "does not include")
+enter(row(1).valueField, "mining")
+enter(app.editor.nameField, "Without mining")
+press(app.editor.saveButton)
+local exclusionID = app.selectedQuery
+app:EditQuery(exclusionID)
+assert(app.editor.mode == "visual" and shown(row(1).operatorBox) == "does not include")
+assert(app.editor.draft.rules[1].operator == "excludes")
+-- Older word/phrase queries remain unchanged and editable in Advanced
+assert(app:SaveQuery(nil, "Legacy food", 'category:"food"',
+    { match = "all", rules = { { field = "category", operator = "phrase", value = "food" } } }))
+app:EditQuery(app.selectedQuery)
+assert(app.editor.mode == "advanced" and app.editor.queryField:GetText() == 'category:"food"')
 h.host:Unload("advancedbanksearch")
 h.host:Unload("bankcore")
 print("query_editor_test: ok")

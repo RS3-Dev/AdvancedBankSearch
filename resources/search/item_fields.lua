@@ -1,6 +1,6 @@
 -- Add bank fields and optional prices to query records
 
-local ObjectConfig = require("advancedbanksearch/core/object_config")
+local ObjectConfig = require("resources/core/object_config")
 
 local QueryItemFields = {}
 

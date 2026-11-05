@@ -20,7 +20,7 @@ local function checkSeparate(h, cleaner, search)
         assert(string.find(moduleName, "^bankcleaner/"), "Bank Cleaner loaded " .. moduleName)
     end
     for moduleName in pairs(search.env.package.loaded) do
-        assert(string.find(moduleName, "^advancedbanksearch/"), "Advanced Bank Search loaded " .. moduleName)
+        assert(string.find(moduleName, "^resources/"), "Advanced Bank Search loaded " .. moduleName)
     end
     for _, subscription in ipairs(h.host:SubscriptionsOf("bankcleaner")) do
         assert(string.find(subscription, "%.bankcleaner_"), subscription)

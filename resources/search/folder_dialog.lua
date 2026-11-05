@@ -1,7 +1,7 @@
 -- Choose a saved search's folder or name a new folder
 -- Bank Core's menus have no submenus, so folders are listed here
 
-local QueryStore = require("advancedbanksearch/search/query_store")
+local QueryStore = require("resources/search/query_store")
 
 local FolderDialog = {}
 FolderDialog.__index = FolderDialog

@@ -6,6 +6,10 @@ local QueryBuilder = {}
 local MAX_RULES = 6
 local MAX_TEXT_LENGTH = 100
 local MAX_NUMBER = 2147483647
+local VISUAL_FIELDS = {
+    name = true, qty = true, price = true, category = true, skills = true, types = true,
+    combatStyle = true, slot = true, tier = true, tradeable = true, augmented = true,
+}
 -- Field order is the order the editor lists them
 local FIELDS = {
     { key = "name", label = "Item name", kind = "text" },
@@ -15,18 +19,41 @@ local FIELDS = {
     { key = "gelow", label = "GE low price", kind = "number" },
 }
 local OPERATORS = {
+    boolean = {
+        { key = "true", label = "is true" },
+        { key = "false", label = "is false" },
+    },
     text = {
         { key = "phrase", label = "has phrase" },
         { key = "words", label = "has all words" },
     },
+    catalog = {
+        { key = "equals", label = "is" },
+        { key = "not_equals", label = "is not" },
+    },
+    list = {
+        { key = "includes", label = "includes" },
+        { key = "excludes", label = "does not include" },
+    },
     number = {
         { key = "equals", label = "is" },
-        -- Both include the number itself, despite the wording
-        { key = "atleast", label = "is greater than" },
-        { key = "atmost", label = "is less than" },
+        { key = "atleast", label = "is at least" },
+        { key = "atmost", label = "is at most" },
         { key = "between", label = "is between" },
     },
 }
+
+-- Refresh catalog fields when RuneQL loads or reloads
+function QueryBuilder.SetCatalog(engine)
+    for index = #FIELDS, 6, -1 do FIELDS[index] = nil end
+    local catalog = engine and engine.Catalog
+    if type(catalog) ~= "table" or type(catalog.Fields) ~= "function" then return end
+    for _, field in ipairs(catalog.Fields()) do
+        FIELDS[#FIELDS + 1] = { key = field.key, label = field.label, kind = field.type,
+            multiple = field.multiple, catalog = true }
+    end
+end
+
 local MULTIPLIERS = { [""] = 1, k = 1000, m = 1000000, b = 1000000000 }
 local NUMBER_HELP = "enter a whole number like 500, 25k, or 1.5m."
 
@@ -49,6 +76,21 @@ local function operatorOf(kind, key)
         if operator.key == key then return operator, index end
     end
     return nil
+end
+
+-- Choose comparisons for each field's data shape
+function QueryBuilder.OperatorKind(fieldKey)
+    local field = fieldOf(fieldKey)
+    if field.catalog and field.kind == "text" then return field.multiple and "list" or "catalog" end
+    return field.kind
+end
+
+-- Keep unsupported older comparisons in Advanced
+function QueryBuilder.SupportsVisual(builder)
+    for _, rule in ipairs(builder.rules) do
+        if operatorOf(QueryBuilder.OperatorKind(rule.field), rule.operator) == nil then return false end
+    end
+    return true
 end
 
 -- Read a whole number, allowing commas and a k, m, or b suffix
@@ -88,16 +130,38 @@ local function buildRule(rule, position)
     if type(rule) ~= "table" then return nil, nil, prefix .. "choose a field." end
     local field = fieldOf(rule.field)
     if field == nil then return nil, nil, prefix .. "choose a field." end
-    local operator = operatorOf(field.kind, rule.operator)
+    local operator = operatorOf(QueryBuilder.OperatorKind(field.key), rule.operator)
+    -- Old catalog phrase/word conditions must still reproduce their saved text
+    if operator == nil and field.catalog and field.kind == "text" then
+        operator = operatorOf("text", rule.operator)
+    end
     if operator == nil then return nil, nil, prefix .. "choose how to compare." end
+
+    if field.kind == "boolean" then
+        -- Explicit false excludes unknown attributes, unlike NOT true
+        return field.key .. ":" .. operator.key, { field = field.key, operator = operator.key }
+    end
 
     if field.kind == "text" then
         local text = trim(rule.value)
-        if text == "" then return nil, nil, prefix .. "enter words from the item name." end
+        if text == "" then
+            return nil, nil, prefix .. (field.key == "name" and "enter words from the item name."
+                or "choose or enter a value.")
+        end
         if #text > MAX_TEXT_LENGTH then
-            return nil, nil, prefix .. "names can contain at most 100 characters."
+            return nil, nil, prefix .. (field.key == "name" and "names" or "values")
+                .. " can contain at most 100 characters."
         end
         local saved = { field = field.key, operator = operator.key, value = text }
+        if operator.key == "equals" or operator.key == "not_equals"
+            or operator.key == "includes" or operator.key == "excludes" then
+            local clause = field.key .. ":[" .. quote(text) .. " TO " .. quote(text) .. "]"
+            if operator.key == "not_equals" or operator.key == "excludes" then
+                -- Require a known value before excluding a selection
+                clause = "(" .. field.key .. ":[* TO *] AND NOT " .. clause .. ")"
+            end
+            return clause, saved
+        end
         if operator.key == "phrase" then
             -- RuneQL matches only letters and digits, so others alone never match
             if not text:find("%w") then return nil, nil, prefix .. "the words need a letter or number." end
@@ -161,10 +225,34 @@ function QueryBuilder.Trusted(builder, query)
     return saved
 end
 
+-- Preserve unknown conditions until their catalog becomes available
+function QueryBuilder.Restore(builder, query)
+    local trusted = QueryBuilder.Trusted(builder, query)
+    if trusted ~= nil then return trusted end
+    if type(builder) ~= "table" or type(builder.rules) ~= "table" then return nil end
+    for _, rule in ipairs(builder.rules) do
+        if type(rule) == "table" and type(rule.field) == "string" and fieldOf(rule.field) == nil then
+            return QueryBuilder.Copy(builder)
+        end
+    end
+    return nil
+end
+
+-- List core fields and any used by an existing search
+function QueryBuilder.VisualFields(builder)
+    local existing, fields = {}, {}
+    for _, rule in ipairs(builder and builder.rules or {}) do existing[rule.field] = true end
+    for _, field in ipairs(FIELDS) do
+        if VISUAL_FIELDS[field.key] or existing[field.key] then fields[#fields + 1] = field end
+    end
+    return fields
+end
+
 -- Make a blank condition for a field
 function QueryBuilder.NewRule(fieldKey)
     local field = fieldOf(fieldKey) or FIELDS[1]
-    return { field = field.key, operator = OPERATORS[field.kind][1].key, value = "", min = "", max = "" }
+    return { field = field.key, operator = OPERATORS[QueryBuilder.OperatorKind(field.key)][1].key,
+        value = "", min = "", max = "" }
 end
 
 -- Make editable text conditions from saved ones

@@ -8,7 +8,7 @@ function RuneQL.Root()
     local root = os.getenv("RUNEQL_ROOT")
     if root == nil then error("set RUNEQL_ROOT to the installed RuneQL plugin folder the tests load", 0) end
     root = string.gsub(root, "\\", "/")
-    local file = io.open(root .. "/lib/api.lua", "rb")
+    local file = io.open(root .. "/resources/lib/api.lua", "rb") or io.open(root .. "/lib/api.lua", "rb")
     if file == nil then error("RuneQL was not found at " .. root, 0) end
     file:close()
     return root
@@ -27,6 +27,8 @@ function RuneQL.Load()
         return loaded[name]
     end
     env.require = load
+    local modern = io.open(root .. "/resources/lib/api.lua", "rb")
+    if modern ~= nil then modern:close(); return load("resources/lib/api") end
     return load("lib/api")
 end
 

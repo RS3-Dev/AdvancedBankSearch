@@ -4,10 +4,9 @@ Advanced Bank Search finds bank items by name, quantity, or GE price and lets yo
 
 ## Before you start
 
-Enable **PrettyUI**, **Bank Core**, **RuneQL**, and **Advanced Bank Search** in the client's plugin manager.
+Enable **PrettyUI**, **Bank Core**, **RuneQL**, **GE Prices**, and **Advanced Bank Search** in the client's plugin manager. All four supporting plugins are required dependencies.
 
-- **GE Prices** is needed only for price searches.
-- **Bank Tags** is needed only to turn a saved search into a tag.
+GE Prices supplies price searches; name, quantity, and catalog matching do not use its price data.
 
 Open a bank and click **Search** on the left rail. There is no separate ribbon panel.
 
@@ -19,6 +18,16 @@ Open a bank and click **Search** on the left rail. There is no separate ribbon p
 
 Matches use RuneQL's search rules, not simple partial-name matching. Whole words matter: `bone` does not match `bones`.
 
+Results close when you leave All Items, use the bank's native search or filter, open presets, or close the bank. The sidebar explains what needs to change. After clearing the restriction, type again or select a saved search to reopen results.
+
+## Settings
+
+Open Advanced Bank Search's settings cog in **Plugin Hub → Manage**. Changes save immediately.
+
+- **Default editor for new searches:** Visual (default) or Advanced. Existing saved searches retain their mode.
+- **Quick-search placeholders:** Include (default) or hide empty bank placeholders. Saved searches always exclude them.
+- **Search delay:** Fast (100 ms), Normal (200 ms, default), or Relaxed (400 ms) after you stop typing.
+
 ## Save a search without writing a query
 
 1. Click **New**.
@@ -28,7 +37,11 @@ Matches use RuneQL's search rules, not simple partial-name matching. Whole words
 5. Choose whether **all** conditions must match or **any one** may match.
 6. Review the generated query and save.
 
-For example, select **Quantity**, **is greater than**, and **100** to find stacks with at least 100 items. The comparisons named “greater than” and “less than” currently **include the entered boundary**.
+For example, select **Quantity**, **is at least**, and **100** to find stacks with at least 100 items. Numeric comparisons include the entered boundary; **is between** has separate Low and High values.
+
+Visual offers Item name, Quantity, GE price, Category, Skills, Types, Combat style, Slot, Tier, Tradeable, and Augmented. Catalog field labels and types still come from RuneQL. Existing saved searches keep access to any other catalog fields they already use; Advanced supports all RuneQL fields. For example, choose **Category**, **is**, and **food**, or **Skills**, **includes**, and **archaeology**. Selecting a catalog text field opens a grid of values supplied by RuneQL. Pick one to fill the value and collapse the grid; clear the value to reopen it. Type in that field to filter the choices. Arrow buttons page through larger lists. Display labels are shown in the grid; the underlying catalog value is saved. Category uses **is / is not**; Skills, Types, Combat style, and Slot use **includes / does not include**. These compare complete values in any case. Negative comparisons exclude items with unknown or empty values. Item name keeps **has phrase / has all words**. Older catalog phrase/word searches keep their query text and open in Advanced.
+
+Flags such as **Augmented**, **Tradeable**, and **Members** offer **is true** and **is false**, with no value to type. An unknown flag matches neither choice. Catalog classifications can be incomplete. **Base value** is a configured item value, separate from current GE prices, and needs no GE Prices plugin.
 
 Click a saved search to open it; click it again to return to the normal bank. **Edit** changes it. **Delete** asks you to press it again to confirm.
 
@@ -46,11 +59,9 @@ Right-click a search to move it into a folder, create a folder, or remove it fro
 
 Click the Sort icon beside the search field, use the row arrows, then click Sort again to finish.
 
-## Advanced queries and tags
+## Advanced queries
 
 **Advanced** lets experienced users type RuneQL directly. Switching a typed query to Visual asks before starting new conditions; keep a copy of important query text first.
-
-With Bank Tags enabled, open its **Import/Share** window, choose **Saved bank search**, and enter your saved search's name. Review the tag preview before importing. This creates a tag from the current matches; it is not a live search-linked tag.
 
 ## If something is missing
 

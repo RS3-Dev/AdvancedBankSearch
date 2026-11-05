@@ -1,5 +1,5 @@
 -- Start Advanced Bank Search on top of Bank Core
--- Dependencies are marked optional so the host tells us when they load or unload
+-- Required plugins are injected before startup; shutdown releases their handles.
 
 local SESSION_KEY = "__advancedbanksearch_session"
 
@@ -20,7 +20,7 @@ if package ~= nil and package.loaded ~= nil then
     end
 end
 
-local App = require("advancedbanksearch/app")
+local App = require("resources/app")
 local app = App.new()
 _G[SESSION_KEY] = app
 app:Start()

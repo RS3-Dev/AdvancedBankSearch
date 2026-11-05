@@ -2,9 +2,10 @@ package.path = "./?.lua;" .. package.path
 
 -- Check built RuneQL text, then what the real RuneQL makes of it
 
-local QueryBuilder = require("advancedbanksearch/search/query_builder")
-local Ranking = require("advancedbanksearch/search/ranking")
+local QueryBuilder = require("resources/search/query_builder")
+local Ranking = require("resources/search/ranking")
 local runeql = require("tools/test_support/runeql").Load()
+QueryBuilder.SetCatalog(runeql)
 
 -- Build conditions, failing the test when they are refused
 local function build(match, rules)
@@ -169,7 +170,86 @@ assert(ranked(cheapRunes, prices) == "2", ranked(cheapRunes, prices))
 assert(ranked(build("any", { rule("gelow", "atmost", "1m") }), prices) == "1,2")
 assert(ranked(build("all", { rule("qty", "atleast", "1") }), nil) == "1,2,3")
 
+-- Catalog fields ---------------------------------------------------------------------
+
+local catalogFields = {}
+for _, key in ipairs(runeql.Catalog.FieldNames()) do catalogFields[key] = true end
+local seen = {}
+for _, field in ipairs(QueryBuilder.FIELDS) do
+    if catalogFields[field.key] then
+        seen[field.key] = true
+        local values = runeql.Catalog.Values(field.key)
+        local value = field.kind == "text" and values[1].value or "5"
+        local operator = field.kind == "boolean" and "true" or field.kind == "text" and "phrase" or "equals"
+        local builtField, savedField = build("all", { rule(field.key, operator, value) })
+        assert(QueryBuilder.Build(QueryBuilder.Draft(savedField)) == builtField)
+        assert(QueryBuilder.Trusted(savedField, builtField) ~= nil)
+        local expected = field.kind == "boolean" and true or field.kind == "number" and 5 or value
+        assert(matches(builtField, { fields = { [field.key] = expected } }), builtField)
+        assert(not matches(builtField, { fields = {} }), builtField)
+    end
+end
+for key in pairs(catalogFields) do assert(seen[key], "Visual is missing catalog field " .. key) end
+
+for _, key in ipairs({ "augmentable", "augmented", "degradable", "tradeable", "geTradeable", "members", "reclaimable" }) do
+    for _, state in ipairs({ "true", "false" }) do
+        local flag, savedFlag = build("all", { rule(key, state, "ignored") })
+        assert(flag == key .. ":" .. state and savedFlag.rules[1].value == nil)
+        assert(matches(flag, { fields = { [key] = state == "true" } }))
+        assert(not matches(flag, { fields = { [key] = state ~= "true" } }))
+        assert(not matches(flag, { fields = {} }))
+    end
+end
+assert(matches(build("all", { rule("skills", "words", "mining smithing") }),
+    { fields = { skills = { "mining", "smithing" } } }))
+assert(not matches(build("all", { rule("skills", "words", "mining smithing") }),
+    { fields = { skills = { "mining" } } }))
+assert(matches(build("all", { rule("category", "phrase", "food") }), { configName = "SHARK" }))
+assert(matches(build("all", { rule("types", "phrase", "weapon"), rule("combatStyle", "phrase", "melee") }),
+    { configName = "BRONZE_SWORD" }))
+local catalogInjection = build("all", { rule("category", "phrase", 'food" OR qty:[0 TO *]') })
+local catalogPlan = assert(runeql.Compile(catalogInjection))
+assert(catalogPlan:Requirements().category and not catalogPlan:Requirements().qty)
+assert(not matches(catalogInjection, { configName = "SHARK", quantity = 1 }))
+
+-- Bank records resolve catalog fields by stable identity
+NAMES[1].configName = "SHARK"
+assert(ranked(build("all", { rule("category", "phrase", "food") }), nil) == "1")
+
 -- Matching all or any ---------------------------------------------------------------
+
+-- Catalog comparisons use complete values and exclude unknowns from negatives
+local food = build("all", { rule("category", "equals", "food") })
+local notFood = build("all", { rule("category", "not_equals", "food") })
+assert(food == 'category:["food" TO "food"]')
+assert(notFood == '(category:[* TO *] AND NOT category:["food" TO "food"])')
+assert(matches(food, { fields = { category = "FOOD" } }))
+assert(not matches(food, { fields = { category = "food-supplies" } }))
+assert(not matches(notFood, { fields = {} }))
+assert(not matches(notFood, { fields = { category = "food" } }))
+assert(matches(notFood, { fields = { category = "food-supplies" } }))
+assert(matches(food, { configName = "SHARK" }))
+assert(not matches(notFood, { configName = "NOT_A_REAL_CONFIG" }))
+local mining = build("all", { rule("skills", "includes", "mining") })
+local noMining = build("all", { rule("skills", "excludes", "mining") })
+assert(matches(mining, { fields = { skills = { "mining", "smithing" } } }))
+assert(not matches(noMining, { fields = { skills = { "mining", "smithing" } } }))
+assert(matches(noMining, { fields = { skills = { "smithing" } } }))
+assert(not matches(noMining, { fields = {} }) and not matches(noMining, { fields = { skills = {} } }))
+local negativeOr = build("any", { rule("skills", "excludes", "mining"), rule("qty", "atleast", "100") })
+assert(not matches(negativeOr, { quantity = 1, fields = {} }))
+assert(matches(negativeOr, { quantity = 100, fields = {} }))
+assert(not matches(negativeOr, { quantity = 1, fields = { skills = { "mining", "smithing" } } }))
+for _, operator in ipairs({ "equals", "not_equals" }) do
+    local text = build("all", { rule("category", operator, 'food" OR qty:[0 TO *] \\ "') })
+    local plan = assert(runeql.Compile(text))
+    assert(plan:Requirements().category and not plan:Requirements().qty)
+end
+local modern, modernBuilder = build("all", { rule("category", "not_equals", "food"), rule("skills", "excludes", "mining") })
+assert(QueryBuilder.SupportsVisual(modernBuilder) and QueryBuilder.Trusted(modernBuilder, modern))
+local legacy, legacyBuilder = build("all", { rule("category", "phrase", "food") })
+assert(QueryBuilder.Trusted(legacyBuilder, legacy) and not QueryBuilder.SupportsVisual(legacyBuilder))
+assert(QueryBuilder.NewRule("category").operator == "equals" and QueryBuilder.NewRule("skills").operator == "includes")
 
 local ironAndMany = { rule("name", "phrase", "iron"), rule("qty", "atleast", "5") }
 local all = build("all", ironAndMany)
@@ -227,5 +307,24 @@ assert(#QueryBuilder.Draft(nil).rules == 1 and QueryBuilder.Draft(nil).rules[1].
 local copy = QueryBuilder.Copy(saved)
 copy.rules[1].value = "changed"
 assert(saved.rules[1].value == "iron" and QueryBuilder.Copy("x") == nil)
+
+-- New discovery fields need no local definition
+local newFields = { Catalog = { Fields = function() return {
+    { key = "futureSkill", label = "Future skill", type = "text", multiple = true },
+    { key = "futureTier", label = "Future tier", type = "number", multiple = false },
+    { key = "futureFlag", label = "Future flag", type = "boolean", multiple = false },
+} end } }
+QueryBuilder.SetCatalog(newFields)
+assert(#QueryBuilder.FIELDS == 8 and QueryBuilder.FieldOf("skills") == nil)
+assert(QueryBuilder.FieldOf("futureSkill").multiple == true)
+local futureQuery, futureBuilder = build("all", { rule("futureSkill", "phrase", "archaeology"),
+    rule("futureTier", "between", nil, "10", "20"), rule("futureFlag", "false") })
+assert(futureQuery == 'futureSkill:"archaeology" AND futureTier:[10 TO 20] AND futureFlag:false')
+QueryBuilder.SetCatalog(nil)
+assert(#QueryBuilder.FIELDS == 5 and QueryBuilder.Trusted(futureBuilder, futureQuery) == nil)
+assert(QueryBuilder.Restore(futureBuilder, futureQuery).rules[1].field == "futureSkill")
+QueryBuilder.SetCatalog(newFields)
+assert(QueryBuilder.Trusted(futureBuilder, futureQuery) ~= nil)
+QueryBuilder.SetCatalog(runeql)
 
 print("query builder test passed")

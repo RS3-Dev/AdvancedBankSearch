@@ -1,9 +1,9 @@
 -- Save queries, folders, and their order as JSON
 -- A save without folders loads its queries ungrouped
 
-local ChunkedStringStore = require("advancedbanksearch/core/chunked_string_store")
-local Json = require("advancedbanksearch/core/json")
-local QueryBuilder = require("advancedbanksearch/search/query_builder")
+local ChunkedStringStore = require("resources/core/chunked_string_store")
+local Json = require("resources/core/json")
+local QueryBuilder = require("resources/search/query_builder")
 
 -- Trim spaces from user text
 local function trim(value)
@@ -214,7 +214,7 @@ local function loadData()
                 id = tostring(numericID),
                 name = name,
                 query = query,
-                builder = QueryBuilder.Trusted(record.builder, query),
+                builder = QueryBuilder.Restore(record.builder, query),
             }
         end
     end

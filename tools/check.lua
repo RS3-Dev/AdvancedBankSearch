@@ -12,7 +12,7 @@ local compiler = interpreter:gsub("lua(%d*)%.exe$", "luac%1.exe"):gsub("lua(%d*)
 -- Globals the host, Lua, and injected dependencies provide
 local ALLOWED = {}
 for name in ([[
-ui id Event prettyui PersistentDB config log Mouse MiniMenuActionType game bankcore runeql geprices banktags PluginShutdown
+ui id Event prettyui PersistentDB config log Mouse MiniMenuActionType game bankcore runeql geprices PluginShutdown
 PluginDependencyUpdate pairs ipairs type tostring tonumber math string table pcall error select
 next setmetatable getmetatable rawget rawset require assert collectgarbage package _G utf8
 ]]):gmatch("%S+") do ALLOWED[name] = true end
@@ -29,7 +29,10 @@ end
 local function trackedFiles(...)
     local _, output = run("git ls-files " .. table.concat({ ... }, " "))
     local files = {}
-    for path in output:gmatch("[^\r\n]+") do files[#files + 1] = path end
+    for path in output:gmatch("[^\r\n]+") do
+        local file = io.open(path, "rb")
+        if file ~= nil then file:close(); files[#files + 1] = path end
+    end
     return files
 end
 
@@ -56,7 +59,7 @@ print(("built %d files into %s"):format(#build.files, build.folder))
 
 -- A runtime source the entry never loads would never ship
 local orphans = 0
-for _, path in ipairs(trackedFiles('"plugins/*.lua"', '"advancedbanksearch/*.lua"')) do
+for _, path in ipairs(trackedFiles('"plugins/*.lua"', '"resources/*.lua"')) do
     if not shipped[path] then
         orphans = orphans + 1
         print("NOT SHIPPED " .. path .. " is loaded by nothing")

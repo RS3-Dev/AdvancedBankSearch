@@ -14,7 +14,7 @@ PersistentDB = {
     end,
 }
 
-local QueryStore = require("advancedbanksearch/search/query_store")
+local QueryStore = require("resources/search/query_store")
 
 -- Bank Utilities' queries in the same data are never read
 values["bankutils:runesql:text:v1:manifest"] = "a:1"
@@ -164,7 +164,7 @@ assert(tree(QueryStore.new()) == "Bars")
 
 -- Visual conditions -------------------------------------------------------------------
 
-local QueryBuilder = require("advancedbanksearch/search/query_builder")
+local QueryBuilder = require("resources/search/query_builder")
 
 -- Read the published save back as text
 local function savedText()

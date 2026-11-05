@@ -1,17 +1,17 @@
 {
   "name": "advancedbanksearch",
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "contactEmailAddress": "plugins@rs3.dev",
   "description": "Advanced Bank Search: RuneQL bank search and saved queries in the bank sidebar. Requires Bank Core and RuneQL.",
   "hasRibbonIcon": false,
-  "dependencies": {
-    "prettyui": 6398181
+  "hasSettingsIcon": true,
+  "requiredDependencies": {
+    "prettyui": 6398181,
+    "bankcore": 6464293,
+    "runeql": 6464301,
+    "geprices": 6414886
   },
-  "optionalDependencies": {
-    "bankcore": "bankcore",
-    "runeql": "runeql",
-    "geprices": "geprices",
-    "banktags": "banktags"
-  },
+  "optionalDependencies": {},
   "requiredPermissions": [],
   "optionalPermissions": []
 }

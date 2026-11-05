@@ -2,7 +2,7 @@
 -- Usage from the repository root: lua54 tools/build.lua [--out dist/release]
 
 local ModuleGraph = require("tools/module_graph")
-local Json = require("advancedbanksearch/core/json")
+local Json = require("resources/core/json")
 
 local Build = {}
 
@@ -14,7 +14,7 @@ Build.PLUGIN = { name = "advancedbanksearch", entry = "plugins/advancedbanksearc
 Build.EVICTION_MARKER = "-- build: every module this plugin loads"
 -- Source directories an output may never sit in
 local SOURCE_DIRECTORIES = {
-    advancedbanksearch = true, plugins = true, tools = true, tests = true, reference = true, docs = true,
+    advancedbanksearch = true, resources = true, plugins = true, tools = true, tests = true, reference = true, docs = true,
 }
 
 local WINDOWS = package.config:sub(1, 1) == "\\"

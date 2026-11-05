@@ -1,7 +1,7 @@
 -- Draw the Search column: field, sort button, status, and saved queries
 -- Refresh and a height change move rows, status, and buttons without rebuilding the field
 
-local NativeButton = require("advancedbanksearch/search/native_button")
+local NativeButton = require("resources/search/native_button")
 
 local SearchTab = {}
 SearchTab.__index = SearchTab
@@ -15,6 +15,7 @@ local SORT_ICON_SIZE = 18
 local BODY_TOP = FIELD_TOP + FIELD_HEIGHT + 6
 local STATUS_LINE_HEIGHT = 16
 local STATUS_GAP = 4
+local EMPTY_PADDING = 6
 -- Rough status character width, to spot a wrapped line
 local STATUS_CHARACTER_WIDTH = 6
 local FOOTER_HEIGHT = 44
@@ -117,7 +118,7 @@ function SearchTab:Build()
     end)
     controls.field = prettyui.TextField.new(parent, {
         x = X, y = FIELD_TOP, width = math.max(1, width - SORT_SIZE - SORT_GAP), height = FIELD_HEIGHT,
-        placeholder = "Search items with RuneQL...", text = app.draft, maxLength = 9999,
+        placeholder = "Search items...", text = app.draft, maxLength = 9999,
         onChange = function(_, _, content)
             -- Starting a search ends sorting
             if tostring(content or "") ~= "" and self.sortMode then self:SetSortMode(false) end
@@ -140,8 +141,8 @@ function SearchTab:Build()
         _onEntryClick = function(_, entryID) self:Click(entryID) end,
     })
     owned[#owned + 1] = controls.list
-    controls.empty = addText(parent, "No saved searches yet. Press New to save one.", BODY_TOP + 6,
-        width, 40, MUTED, 2)
+    controls.empty = addText(parent, "No saved searches yet. Press New to save one.", BODY_TOP + EMPTY_PADDING,
+        math.max(1, width - EMPTY_PADDING * 2), 40, MUTED, 2)
     owned[#owned + 1] = controls.empty
     local top = ctx.height - FOOTER_HEIGHT + 8
     local buttonWidth = math.floor((width - BUTTON_GAP * 2) / 3)
@@ -327,7 +328,7 @@ function SearchTab:Layout(text)
     controls.listTop = top
     controls.list.root:SetPos(X, top)
     controls.list:SetSize(controls.width, math.max(ROW_HEIGHT, controls.height - FOOTER_HEIGHT - top - 4))
-    controls.empty:SetPos(X, top + 6)
+    controls.empty:SetPos(X + EMPTY_PADDING, top + EMPTY_PADDING)
 end
 
 -- Refresh the status, saved queries, and buttons

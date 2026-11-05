@@ -2,8 +2,8 @@ package.path = "./?.lua;" .. package.path
 
 -- Rank bank stacks with the real RuneQL
 
-local Ranking = require("advancedbanksearch/search/ranking")
-local ItemFields = require("advancedbanksearch/search/item_fields")
+local Ranking = require("resources/search/ranking")
+local ItemFields = require("resources/search/item_fields")
 local runeql = require("tools/test_support/runeql").Load()
 
 local NAMES = {

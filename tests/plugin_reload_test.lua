@@ -20,7 +20,7 @@ local search = h:LoadSearch()
 local app = h:App()
 assert(app ~= nil and not app:IsConnected() and search.result == nil and app:RuneQL() == nil)
 for moduleName in pairs(search.env.package.loaded) do
-    assert(string.sub(moduleName, 1, 19) == "advancedbanksearch/", moduleName .. " is not this plugin's module")
+    assert(string.sub(moduleName, 1, 10) == "resources/", moduleName .. " is not this plugin's module")
 end
 -- Saving needs RuneQL and writes to this plugin's own data
 assert(select(2, app:SaveQuery(nil, "Iron", "iron")) == "Searching needs RuneQL. Enable RuneQL to search your bank.")
@@ -45,7 +45,7 @@ assert(app.tab.controls ~= nil and app:ChooseQuery("1") and app:ShownPage() == "
 
 -- A Core reload registers again, and the column mounts again
 local oldExt = app.ext
-h.host:Reload("bankcore", { shutdown = true, notify = true, reinject = true })
+h.host:Reload("bankcore", { shutdown = true, notify = true, reinject = true, notifyRequired = true })
 assert(app:IsConnected() and app.ext ~= oldExt and select(2, oldExt:Open()) == "stale")
 assert(app:ShownPage() == nil and app.items == nil and app.pageID == nil)
 h:OpenBank()
@@ -95,11 +95,11 @@ h:Tick(2)
 assert(reloaded.tab.controls ~= nil)
 
 -- A reload that keeps cached modules still runs fresh ones
-local cachedApp = h.search.env.package.loaded["advancedbanksearch/app"]
+local cachedApp = h.search.env.package.loaded["resources/app"]
 h.host:Reload("advancedbanksearch")
 local hot = h:App()
 assert(hot ~= reloaded and reloaded.shutDown and hot:IsConnected())
-assert(h.search.env.package.loaded["advancedbanksearch/app"] ~= cachedApp)
+assert(h.search.env.package.loaded["resources/app"] ~= cachedApp)
 h:Tick(2)
 
 -- Unloading mid-wait leaves no tab, listener, or subscription behind
@@ -122,7 +122,7 @@ local first = split:LoadSearch()
 local firstApp = rawget(first.env, "__advancedbanksearch_session")
 assert(firstApp:IsConnected() and rawget(first.env._G, "__bankcore_api") == nil)
 local second = split.host:Load("advancedbanksearch_copy", split.searchFolder, { name = "advancedbanksearch",
-    dependencies = {}, optional = { bankcore = true, runeql = true, geprices = true, banktags = true } })
+    dependencies = {}, optional = { bankcore = true, runeql = true, geprices = true } })
 local secondApp = rawget(second.env, "__advancedbanksearch_session")
 assert(secondApp:IsConnected() and select(2, firstApp.ext:Open()) == "stale")
 assert(select(2, secondApp.ext:Open()) == "no_page")

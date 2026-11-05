@@ -2,7 +2,7 @@
 -- A match names its object; Bank Core shows an object's stocked stacks first
 -- Price queries wait for prices, since "not" on a missing field matches everything
 
-local ItemFields = require("advancedbanksearch/search/item_fields")
+local ItemFields = require("resources/search/item_fields")
 
 local Ranking = {}
 
