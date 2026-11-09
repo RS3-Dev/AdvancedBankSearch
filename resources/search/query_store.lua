@@ -4,6 +4,7 @@
 local ChunkedStringStore = require("resources/core/chunked_string_store")
 local Json = require("resources/core/json")
 local QueryBuilder = require("resources/search/query_builder")
+local ItemIdentity = require("resources/search/item_identity")
 
 -- Trim spaces from user text
 local function trim(value)
@@ -32,6 +33,7 @@ local function copyRecord(record)
         name = tostring(record.name or ""),
         query = tostring(record.query or ""),
         builder = QueryBuilder.Copy(record.builder),
+        icon = type(record.icon) == "string" and record.icon or nil,
     }
 end
 
@@ -59,7 +61,8 @@ local function copyData(data)
             local members = {}
             for _, queryID in ipairs(listOf(folder, "queries")) do members[#members + 1] = tostring(queryID) end
             result.folders[#result.folders + 1] = { id = tostring(folder.id or ""), name = tostring(folder.name or ""),
-                collapsed = folder.collapsed == true, queries = members }
+                collapsed = folder.collapsed == true, queries = members,
+                icon = type(folder.icon) == "string" and folder.icon or nil }
         end
     end
     for _, entry in ipairs(listOf(data, "order")) do
@@ -215,6 +218,7 @@ local function loadData()
                 name = name,
                 query = query,
                 builder = QueryBuilder.Restore(record.builder, query),
+                icon = record.icon,
             }
         end
     end
@@ -290,10 +294,16 @@ end
 -- Validate and save a query with the conditions it was built from
 -- Conditions that do not give the query are not kept
 -- Edits keep their place; new queries go at the end
-function QueryStore:Save(queryID, name, query, builder)
+function QueryStore:Save(queryID, name, query, builder, spriteObjectID)
     local reason
     name, query, reason = validate(name, query)
     if name == nil then return false, nil, reason end
+    local icon
+    if spriteObjectID ~= nil then
+        local objectID = math.tointeger(tonumber(spriteObjectID))
+        if objectID == nil or objectID < 0 or objectID > 2147483647 then return false, nil, "Choose a valid item icon." end
+        icon = ItemIdentity.Reference(objectID)
+    end
     builder = QueryBuilder.Trusted(builder, query)
     queryID = queryID ~= nil and tostring(queryID) or nil
     if self:FindName(name, queryID) ~= nil then
@@ -308,6 +318,7 @@ function QueryStore:Save(queryID, name, query, builder)
                 record.name = name
                 record.query = query
                 record.builder = builder
+                record.icon = icon or record.icon
                 savedRecord = record
                 break
             end
@@ -319,6 +330,7 @@ function QueryStore:Save(queryID, name, query, builder)
             name = name,
             query = query,
             builder = builder,
+            icon = icon,
         }
         nextData.nextId = nextData.nextId + 1
         nextData.queries[#nextData.queries + 1] = savedRecord
@@ -358,7 +370,7 @@ function QueryStore:Tree()
             local members = {}
             for index, queryID in ipairs(folder.queries) do members[index] = copyRecord(records[queryID]) end
             nodes[#nodes + 1] = { kind = "folder", id = folder.id, name = folder.name,
-                collapsed = folder.collapsed, queries = members }
+                collapsed = folder.collapsed, queries = members, icon = folder.icon }
         end
     end
     return nodes
@@ -368,7 +380,7 @@ end
 function QueryStore:GetFolder(folderID)
     local folder = findFolder(self.data, tostring(folderID or ""))
     if folder == nil then return nil end
-    return { id = folder.id, name = folder.name, collapsed = folder.collapsed, count = #folder.queries }
+    return { id = folder.id, name = folder.name, collapsed = folder.collapsed, count = #folder.queries, icon = folder.icon }
 end
 
 -- List the folders in sidebar order
@@ -412,7 +424,7 @@ function QueryStore:CreateFolder(name, queryID)
 end
 
 -- Rename a folder; its ID and members stay
-function QueryStore:RenameFolder(folderID, name)
+function QueryStore:RenameFolder(folderID, name, spriteObjectID)
     folderID = tostring(folderID or "")
     if findFolder(self.data, folderID) == nil then return false, FOLDER_GONE end
     local reason
@@ -420,7 +432,13 @@ function QueryStore:RenameFolder(folderID, name)
     if name == nil then return false, reason end
     if folderNamed(self.data, name, folderID) ~= nil then return false, "A folder with that name already exists." end
     local nextData = copyData(self.data)
-    findFolder(nextData, folderID).name = name
+    local folder = findFolder(nextData, folderID)
+    folder.name = name
+    if spriteObjectID ~= nil then
+        local objectID = math.tointeger(tonumber(spriteObjectID))
+        if objectID == nil or objectID < 0 or objectID > 2147483647 then return false, "Choose a valid item icon." end
+        folder.icon = ItemIdentity.Reference(objectID)
+    end
     return self:Commit(nextData)
 end
 
@@ -474,26 +492,46 @@ function QueryStore:MoveToFolder(queryID, folderID)
     return self:Commit(nextData)
 end
 
--- Move a folder or query one step among its siblings
--- Moving past either end changes nothing
-function QueryStore:Move(kind, entryID, offset)
-    if offset ~= -1 and offset ~= 1 then return false, "Choose up or down." end
-    entryID = tostring(entryID or "")
-    local nextData = copyData(self.data)
-    local folderID = kind == "query" and self:FolderOf(entryID) or nil
-    local siblings = folderID ~= nil and findFolder(nextData, folderID).queries or nextData.order
-    local source
-    for index, sibling in ipairs(siblings) do
-        if sibling == entryID or (type(sibling) == "table" and sibling.kind == kind and sibling.id == entryID) then
-            source = index
+-- Bank Tags keeps icon references by config name, with #id for unknown configs.
+function QueryStore:GetQuerySprite(queryID)
+    local record = self:Get(queryID)
+    return record and ItemIdentity.ObjectID(record.icon) or nil
+end
+
+function QueryStore:GetFolderSprite(folderID)
+    local record = self:GetFolder(folderID)
+    return record and ItemIdentity.ObjectID(record.icon) or nil
+end
+
+-- Move a query or whole folder among its siblings, just like Bank Tags.
+function QueryStore:Reorder(source, target, after)
+    if type(source) ~= "table" or type(target) ~= "table" then return false, "Choose a sidebar entry." end
+    local function location(data, entry)
+        if entry.kind == "query" then
+            for _, folder in ipairs(data.folders) do
+                for index, queryID in ipairs(folder.queries) do
+                    if queryID == entry.id then return folder.queries, index end
+                end
+            end
+        end
+        for index, value in ipairs(data.order) do
+            if value.kind == entry.kind and value.id == entry.id then return data.order, index end
         end
     end
-    if source == nil then return false, "That entry no longer exists." end
-    local destination = source + offset
-    if destination < 1 or destination > #siblings then return false, nil end
-    siblings[source], siblings[destination] = siblings[destination], siblings[source]
+    local nextData = copyData(self.data)
+    local siblings, from = location(nextData, source)
+    local targetSiblings, to = location(nextData, target)
+    if siblings == nil or targetSiblings == nil then return false, "That entry no longer exists." end
+    if targetSiblings ~= siblings then return false, "Move entries among their siblings." end
+    if after then to = to + 1 end
+    if from < to then to = to - 1 end
+    if from == to then return false, nil end
+    local entry = table.remove(siblings, from)
+    table.insert(siblings, to, entry)
     return self:Commit(nextData)
 end
+
+require("resources/search/query_sharing").install(QueryStore)
 
 QueryStore.MAX_NAME_LENGTH = MAX_NAME_LENGTH
 QueryStore.MAX_QUERY_LENGTH = MAX_QUERY_LENGTH

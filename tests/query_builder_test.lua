@@ -327,4 +327,70 @@ QueryBuilder.SetCatalog(newFields)
 assert(QueryBuilder.Trusted(futureBuilder, futureQuery) ~= nil)
 QueryBuilder.SetCatalog(runeql)
 
+-- Exclusion is standalone-safe, persists, and never treats a missing field as a value.
+local excludedDose = rule("dose", "between", nil, "1", "3")
+excludedDose.negate = true
+local doseQuery, doseSaved = build("all", { excludedDose })
+assert(doseQuery == '(dose:[* TO *] AND NOT dose:[1 TO 3])')
+for _, value in ipairs({ 0, 1, 2, 3, 4, 6 }) do
+    assert(matches(doseQuery, { fields = { dose = value } }) == (value < 1 or value > 3))
+end
+assert(not matches(doseQuery, { fields = {} }))
+assert(QueryBuilder.Draft(doseSaved).rules[1].negate)
+assert(QueryBuilder.Copy(doseSaved).rules[1].negate)
+assert(QueryBuilder.Trusted(doseSaved, doseQuery))
+local excludedCategory = rule("category", "equals", "ammunition")
+excludedCategory.negate = true
+local categoryQuery = build("all", { excludedCategory })
+assert(not matches(categoryQuery, { fields = { category = "ammunition" } }))
+assert(matches(categoryQuery, { fields = { category = "food" } }))
+assert(not matches(categoryQuery, { fields = {} }))
+local oldNegative = QueryBuilder.Draft(modernBuilder)
+assert(oldNegative.rules[1].operator == "equals" and oldNegative.rules[1].negate)
+assert(QueryBuilder.Build(oldNegative) == modern)
+local excludedFlag = rule("augmented", "true")
+excludedFlag.negate = true
+local flagQuery = build("all", { excludedFlag })
+assert(matches(flagQuery, { fields = { augmented = false } }))
+assert(not matches(flagQuery, { fields = {} }))
+
+-- Parentheses preserve nested AND/OR meaning and survive copying and editing.
+local nestedQuery, nestedSaved = build("all", {
+    { match = "any", rules = { rule("category", "equals", "food"), rule("dose", "equals", "4") } },
+    rule("qty", "atleast", "10"),
+    { match = "any", rules = { excludedCategory, { match = "all", rules = { excludedDose } } } },
+})
+assert(matches(nestedQuery, { quantity = 10, fields = { category = "food", dose = 2 } }))
+assert(matches(nestedQuery, { quantity = 20, fields = { category = "ammunition", dose = 4 } }))
+assert(not matches(nestedQuery, { quantity = 9, fields = { category = "food", dose = 4 } }))
+assert(not matches(nestedQuery, { quantity = 20, fields = { category = "ammunition", dose = 2 } }))
+assert(QueryBuilder.SupportsVisual(nestedSaved) and QueryBuilder.Trusted(nestedSaved, nestedQuery))
+assert(QueryBuilder.Build(QueryBuilder.Draft(nestedSaved)) == nestedQuery)
+local nestedCopy = QueryBuilder.Copy(nestedSaved)
+nestedCopy.rules[1].rules[1].value = "changed"
+assert(nestedSaved.rules[1].rules[1].value == "food")
+assert(refused("all", { { match = "any", rules = {} } }) == "Add at least one condition to each group.")
+local tooDeep = { match = "all", rules = { rule("qty", "equals", "1") } }
+for _ = 1, 4 do tooDeep = { match = "any", rules = { tooDeep } } end
+assert(QueryBuilder.Build(tooDeep) == nil)
+
+-- A root OR compares entire AND groups. An expensive item in another slot
+-- and a cheap body item must not leak through as they would with three flat ORs.
+local bodyOrHead, bodyOrHeadSaved = build("any", {
+    { match = "all", rules = { rule("price", "atleast", "1000"), rule("slot", "includes", "body") } },
+    { match = "all", rules = { rule("slot", "includes", "head") } },
+})
+assert(bodyOrHead == '(price:[1000 TO *] AND slot:["body" TO "body"]) OR (slot:["head" TO "head"])')
+for _, example in ipairs({
+    { { price = 999, slot = { "body" } }, false },
+    { { price = 1000, slot = { "body" } }, true },
+    { { price = 0, slot = { "head" } }, true },
+    { { price = 10000, slot = { "feet" } }, false },
+    { { slot = { "body" } }, false },
+    { {}, false },
+}) do
+    assert(matches(bodyOrHead, { fields = example[1] }) == example[2])
+end
+assert(QueryBuilder.Build(QueryBuilder.Draft(bodyOrHeadSaved)) == bodyOrHead)
+
 print("query builder test passed")

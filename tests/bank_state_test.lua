@@ -27,6 +27,12 @@ h:Tick(2)
 local saved, record = app.queries:Save(nil, "Iron", "iron")
 assert(saved)
 local persisted = app.queries.data
+local function warningShown()
+    local controls = assert(app.tab.controls)
+    assert(controls.statusBanner.parent == app.tab.ctx.overlay and controls.statusBanner.clickthrough)
+    assert(not controls.statusBanner.hidden and controls.statusText.content == app.status)
+    assert(controls.statusText.clickthrough and controls.statusText.alignHorizontal == ui.AlignMode.CENTRE)
+end
 local function available()
     return { bankOpen = true, viewAll = true, searchActive = false, filterActive = false, presetOpen = false }
 end
@@ -34,6 +40,7 @@ for _, restriction in ipairs({ "bankOpen", "viewAll", "searchActive", "filterAct
     for _, savedQuery in ipairs({ false, true }) do
         if savedQuery then assert(app:ChooseQuery(record.id)) else app:SetText("iron") end
         assert(app:ShownPage() ~= nil)
+        assert(app.tab.controls.statusBanner.hidden, "match counts must not become title notices")
         app:QueueText("iron bar")
         local state = available()
         state[restriction] = restriction ~= "bankOpen" and restriction ~= "viewAll"
@@ -41,12 +48,13 @@ for _, restriction in ipairs({ "bankOpen", "viewAll", "searchActive", "filterAct
         listener(state)
         assert(closes == before + 1 and app:ShownPage() == nil and layout.shownPage == nil, restriction)
         assert(app.pageID == nil and app.priceWait == nil and app.searchWait == nil)
-        assert(app.statusIsError and app.status ~= nil)
+        assert(app.tab.controls.statusBanner.hidden, "entering a restricted state must not warn")
         listener(state)
         assert(closes == before + 1)
         listener(available())
         h:Tick(20)
         assert(app:ShownPage() == nil and app.pageID == nil and app.status == nil)
+        assert(app.tab.controls.statusBanner.hidden)
         assert(app.queries.data == persisted and app.queries:Get(record.id).query == "iron")
     end
 end
@@ -77,8 +85,13 @@ for _, mode in ipairs({
     session.pluginPages:Notify()
     h:Tick(12)
     assert(app:ShownPage() == nil and layout.shownPage == nil and app.pageID == nil)
-    assert(app.statusIsError and app.status:find(mode.message, 1, true), tostring(app.status))
+    assert(app.tab.controls.statusBanner.hidden)
     assert(not app:ChooseQuery(record.id) and app.pageID == nil)
+    assert(app.statusIsError and app.status:find(mode.message, 1, true), tostring(app.status))
+    warningShown()
+    session.pluginPages:Notify()
+    h:Tick(2)
+    warningShown()
     cancel.visible = false
     session.pluginPages:Notify()
     h:Tick(12)
@@ -95,14 +108,29 @@ for _, restriction in ipairs({ "viewAll", "presetOpen" }) do
     if restriction == "viewAll" then background.spriteID = 8069 else preset.visible = true end
     session.pluginPages:Notify()
     h:Tick(12)
-    assert(app:ShownPage() == nil and app.pageID == nil and app.statusIsError)
+    assert(app:ShownPage() == nil and app.pageID == nil and app.tab.controls.statusBanner.hidden)
     assert(not app:ChooseQuery(record.id))
+    warningShown()
     background.spriteID, preset.visible = 8070, false
     layout:SetNativeViewAll(true)
     session.pluginPages:Notify()
     h:Tick(12)
     assert(app.status == nil and app:ShownPage() == nil)
 end
+
+-- Moving between restrictions never produces a warning without a new attempt.
+app:SetText("iron")
+local restricted = available()
+restricted.searchActive = true
+listener(restricted)
+assert(app.tab.controls.statusBanner.hidden)
+app:ShowBankStateError("search_active")
+warningShown()
+restricted.searchActive, restricted.filterActive = false, true
+listener(restricted)
+assert(app.status == nil and app.tab.controls.statusBanner.hidden)
+listener(available())
+assert(app.tab.controls.statusBanner.hidden)
 
 -- A restriction never closes another extension's page.
 local other = assert(core.result.Register({ id = "other", name = "Other" }))

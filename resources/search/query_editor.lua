@@ -3,14 +3,16 @@
 
 local QueryBuilder = require("resources/search/query_builder")
 local QueryStore = require("resources/search/query_store")
+local ObjectConfig = require("resources/search/object_config")
+local ItemIdentity = require("resources/search/item_identity")
 
 local QueryEditor = {}
 QueryEditor.__index = QueryEditor
 
-local WIDTH = 620
-local HEIGHT = 560
-local MARGIN = 16
-local CONTENT_WIDTH = WIDTH - 16 - MARGIN * 2
+local MARGIN = 8
+local SCROLLBAR_WIDTH = 18
+local GROUP_PADDING = 6
+local GROUP_GAP = 8
 local BUTTON_GAP = 8
 local CONTROL_HEIGHT = 28
 local LABEL_COLOUR = 0xF2C66DFF
@@ -19,26 +21,17 @@ local PREVIEW_COLOUR = 0xE7D7B0FF
 local ERROR_COLOUR = 0xE57373FF
 local SMALL_FONT = id.Font.MUSEO_SANS_11PT_REGULAR
 -- Where the mode panels start, and the rows of conditions
-local PANEL_TOP = 110
-local ROWS_TOP = 146
-local ROW_HEIGHT = 34
+local PANEL_TOP = 74
+local ROWS_TOP = 110
 local QUERY_FIELD_HEIGHT = 288
-local FOOTER_HEIGHT = 64
-local BUTTONS_TOP = 28
--- Columns of a condition row
-local FIELD_WIDTH = 140
-local OPERATOR_X = MARGIN + 146
-local OPERATOR_WIDTH = 136
-local VALUE_X = MARGIN + 288
-local VALUE_WIDTH = 210
-local BOUND_WIDTH = 92
-local REMOVE_X = MARGIN + 504
-local REMOVE_WIDTH = CONTENT_WIDTH - 504
+local FOOTER_PADDING = 4
+local FOOTER_HEIGHT = CONTROL_HEIGHT + FOOTER_PADDING * 2
+local STATUS_HEIGHT = 22
+local BUTTONS_TOP = FOOTER_PADDING
 local MATCH_CHOICES = { { key = "all", label = "all conditions (AND)" }, { key = "any", label = "any condition (OR)" } }
-local PICKER_COLUMNS = 4
 local PICKER_PAGE_SIZE = 24
 local PICKER_ROW_HEIGHT = 28
-local LEAVE_TEXT = "Visual conditions replace this RuneQL. Press Visual again to use them."
+local REPLACE_TEXT = "Saving visual conditions will replace the advanced query."
 local INCOMPLETE = "The conditions are incomplete, so the RuneQL text was not changed."
 
 -- Trim spaces from user text
@@ -80,6 +73,8 @@ function QueryEditor.new(parent, options)
     local builder = QueryBuilder.Trusted(record.builder, record.query)
     if builder ~= nil and not QueryBuilder.SupportsVisual(builder) then builder = nil end
     local self = setmetatable({
+        onClose = options.onClose,
+        onChooseSprite = options.onChooseSprite,
         ready = false,
         destroyed = false,
         fields = sortedChoices(QueryBuilder.VisualFields(builder)),
@@ -97,21 +92,31 @@ function QueryEditor.new(parent, options)
         visualControls = {},
         advancedControls = {},
         slots = {},
+        groupSlots = {},
         -- The RuneQL last built from the conditions and their saved form
         -- Advanced keeps the conditions only while its text is this
         generated = nil,
         generatedBuilder = nil,
-        confirmVisual = false,
     }, QueryEditor)
-    if builder ~= nil then
-        self.mode = "visual"
-        self.generated, self.generatedBuilder = record.query, builder
-    else
-        self.mode = record.id ~= nil and "advanced" or options.defaultMode == "advanced" and "advanced" or "visual"
-    end
+    if builder ~= nil then self.generated, self.generatedBuilder = record.query, builder end
+    self.mode = options.editorMode == "advanced" and "advanced"
+        or record.id ~= nil and builder == nil and "advanced" or "visual"
     self.draft = QueryBuilder.Draft(builder)
 
-    for kind, choices in pairs(QueryBuilder.OPERATORS) do self.operators[kind] = sortedChoices(choices) end
+    for kind, choices in pairs(QueryBuilder.OPERATORS) do
+        local positive = {}
+        for _, choice in ipairs(choices) do
+            if choice.key ~= "not_equals" and choice.key ~= "excludes" then positive[#positive + 1] = choice end
+        end
+        self.operators[kind] = sortedChoices(positive)
+    end
+    local state = options.state
+    if state ~= nil then
+        self.draft, self.mode = state.draft, state.mode
+        self.generated, self.generatedBuilder = state.generated, state.generatedBuilder
+        self.pickerIndex, self.pickerPage, self.pickerValues = state.pickerIndex, state.pickerPage, state.pickerValues
+        self.preservedAdvanced, self.visualBaseline = state.preservedAdvanced, state.visualBaseline
+    end
     local built, reason = pcall(self.Build, self, parent, options)
     if not built then
         self:Destroy()
@@ -123,32 +128,46 @@ end
 -- Construct controls before allowing their callbacks
 function QueryEditor:Build(parent, options)
     local record = options.record or {}
-    self.window = prettyui.Window.new(parent, {
-        title = record.id ~= nil and "Edit RuneQL Query" or "Create RuneQL Query",
-        x = -math.floor(WIDTH / 2),
-        y = -math.floor(HEIGHT / 2),
-        xAnchor = 0.5,
-        yAnchor = 0.5,
-        width = WIDTH,
-        height = HEIGHT,
-        minWidth = WIDTH,
-        maxWidth = WIDTH,
-        minHeight = HEIGHT,
-        maxHeight = HEIGHT,
-        scrollable = false,
-        destroyOnClose = true,
-        onClose = function()
-            self:Destroy()
-            if options.onClose ~= nil then options.onClose() end
-        end,
-    })
-    self.body = self:Own(prettyui.SimpleView.new(self.window.content, {
+    self.nameText = options.state and options.state.name or record.name or ""
+    self.queryText = options.state and options.state.query or record.query or ""
+    self.spriteObjectID = options.state and options.state.spriteObjectID or ItemIdentity.ObjectID(record.icon)
+    self.width = math.max(1, options.width or parent.width)
+    self.contentWidth = math.max(1, self.width - MARGIN * 2 - SCROLLBAR_WIDTH)
+    self.narrow = self.contentWidth < 600
+    self.rowHeight = self.narrow and 68 or 34
+    self.fieldWidth = self.narrow and math.floor((self.contentWidth - 76) * 0.48) or 140
+    self.operatorX = MARGIN + self.fieldWidth + 6
+    self.operatorWidth = self.narrow and self.contentWidth - self.fieldWidth - 76 or 136
+    self.negateX = self.operatorX + self.operatorWidth + 6
+    self.valueX = self.narrow and MARGIN or self.negateX + 34
+    -- On two-line rows the value has the whole second line; its trash is above it.
+    self.valueWidth = self.narrow and self.contentWidth or self.contentWidth - (self.valueX - MARGIN) - 34
+    self.boundWidth = math.floor((self.valueWidth - 28) / 2)
+    self.pickerColumns = math.max(1, math.min(4, math.floor(self.contentWidth / 110)))
+    self.root = ui.Layer.new(parent)
+    self.root:SetSize(self.width, options.height or parent.height)
+    local overlay = options.overlay or parent
+    prettyui.Tooltip.registerContext(self.root, overlay, function(target)
+        local function position(node)
+            local x, y = 0, 0
+            while node ~= nil do
+                x, y = x + (node.x or 0), y + (node.y or 0)
+                node = node.parent
+            end
+            return x, y
+        end
+        local x, y = position(target)
+        local ox, oy = position(overlay)
+        return x - ox, y - oy
+    end)
+    self.body = self:Own(prettyui.SimpleView.new(self.root, {
+        y = 0,
         width = 0, widthAnchor = 1.0,
         height = -FOOTER_HEIGHT, heightAnchor = 1.0,
         scrollable = true,
     }))
     self.content = self.body.content
-    local footer = { root = ui.Layer.new(self.window.content) }
+    local footer = { root = ui.Layer.new(self.root) }
     function footer:Destroy() self.root:Destroy() end
     self.footer = self:Own(footer)
     footer.root:SetPos(0, -FOOTER_HEIGHT, 0, 1.0)
@@ -157,37 +176,41 @@ function QueryEditor:Build(parent, options)
     self.nameLabel = self:Own(prettyui.Text.new(self.content, {
         text = "Query name",
         x = MARGIN,
-        y = 10,
-        width = CONTENT_WIDTH,
+        y = 6,
+        width = self.contentWidth,
         height = 20,
         colour = LABEL_COLOUR,
         font = id.Font.CINZEL_13PT_BOLD,
     }))
     self.nameField = self:Own(prettyui.TextField.new(self.content, {
         x = MARGIN,
-        y = 31,
-        width = CONTENT_WIDTH,
+        y = 27,
+        width = self.contentWidth - 48,
         height = 30,
-        text = record.name or "",
+        text = self.nameText,
         placeholder = "Search name",
         maxLength = QueryStore.MAX_NAME_LENGTH,
-        onChange = function() self:ClearStatus() end,
+        onChange = function(_, _, value)
+            if not self.ready then return end
+            self.nameText = tostring(value or "")
+            self:ClearStatus()
+        end,
     }))
-    self.visualButton = self:Own(prettyui.SimpleButton.new(self.content, "Visual", function()
-        self:ChooseVisual()
-    end, { x = MARGIN, y = 72, width = 100, height = CONTROL_HEIGHT }))
-    self.advancedButton = self:Own(prettyui.SimpleButton.new(self.content, "Advanced", function()
-        self:ChooseAdvanced()
-    end, { x = MARGIN + 106, y = 72, width = 100, height = CONTROL_HEIGHT }))
-
+    self.spriteSlot = self:Own(prettyui.ItemSlot.new(self.content, ObjectConfig.FromID(self.spriteObjectID), {
+        x = MARGIN + self.contentWidth - 40, y = 22, clickthrough = false, tooltip = "Click to edit",
+    }))
+    self.spriteSlot.root:Subscribe(ui.Hook.ONCLICK, function()
+        if self.ready and self.onChooseSprite ~= nil then self.onChooseSprite(self) end
+        return false
+    end)
     self:BuildVisual()
-    self:BuildAdvanced(record.query or "")
+    self:BuildAdvanced(self.queryText)
 
     self.status = self:Own(prettyui.Text.new(self.footer.root, {
         text = "",
         x = MARGIN,
         y = 4,
-        width = CONTENT_WIDTH,
+        width = self.contentWidth,
         height = 18,
         colour = ERROR_COLOUR,
         font = SMALL_FONT,
@@ -195,9 +218,9 @@ function QueryEditor:Build(parent, options)
     }))
     self.status.hidden = true
 
-    local buttonWidth = math.floor((CONTENT_WIDTH - BUTTON_GAP) / 2)
+    local buttonWidth = math.floor((self.contentWidth - BUTTON_GAP) / 2)
     self.cancelButton = self:Own(prettyui.SimpleButton.new(self.footer.root, "Cancel", function()
-        self.window:Close()
+        self:Close(false)
     end, {
         x = MARGIN,
         y = BUTTONS_TOP,
@@ -209,7 +232,7 @@ function QueryEditor:Build(parent, options)
     end, {
         x = MARGIN + buttonWidth + BUTTON_GAP,
         y = BUTTONS_TOP,
-        width = CONTENT_WIDTH - buttonWidth - BUTTON_GAP,
+        width = self.contentWidth - buttonWidth - BUTTON_GAP,
         height = CONTROL_HEIGHT,
     }))
 
@@ -219,6 +242,10 @@ function QueryEditor:Build(parent, options)
     if self.blocked ~= nil then
         self.saveButton:SetDisabled(true)
         self:SetStatus(self.blocked)
+    end
+    if options.state ~= nil then
+        self:SetStatus(options.state.status)
+        if self.body.SetScrollPosition then self.body:SetScrollPosition(options.state.scrollY) end
     end
     return self
 end
@@ -246,7 +273,7 @@ function QueryEditor:BuildVisual()
     self.matchBox = self:Own(prettyui.ComboBox.new(content, {
         x = MARGIN + 56,
         y = PANEL_TOP,
-        width = 220,
+        width = math.min(220, self.contentWidth - 130),
         height = CONTROL_HEIGHT,
         entries = entriesOf(MATCH_CHOICES),
         selectedID = self.draft.match == "any" and 2 or 1,
@@ -257,17 +284,24 @@ function QueryEditor:BuildVisual()
         end,
     }), group)
 
+    -- Draw group surfaces before condition controls so their contents stay above them.
+    for index = 1, QueryBuilder.MAX_RULES do self.groupSlots[index] = self:BuildGroupRow(index) end
     for index = 1, QueryBuilder.MAX_RULES do self.slots[index] = self:BuildRow(index) end
 
-    local addTop = ROWS_TOP + ROW_HEIGHT * QueryBuilder.MAX_RULES + 4
-    self.addButton = self:Own(prettyui.SimpleButton.new(content, "Add condition", function()
+    local addLeft = MARGIN + 56 + math.min(220, self.contentWidth - 130) + 6
+    self.addButton = self:Own(prettyui.SimpleButton.new(content, id.Sprite.BP3_MISSION_PLUS_ICON, function()
         self:AddRule()
-    end, { x = MARGIN, y = addTop, width = 140, height = CONTROL_HEIGHT }), group)
+    end, { x = addLeft, y = PANEL_TOP, width = CONTROL_HEIGHT, height = CONTROL_HEIGHT,
+        iconSize = 18, tooltip = "Add condition to the query, outside groups" }), group)
+    self.addGroupButton = self:Own(prettyui.SimpleButton.new(content, id.Sprite.MTX_STORE_BTN_PLUS_ACTIVE, function()
+        self:AddGroup(self.draft, 0)
+    end, { x = addLeft + 34, y = PANEL_TOP, width = CONTROL_HEIGHT, height = CONTROL_HEIGHT,
+        iconSize = 18, tooltip = "Add group to the query" }), group)
     self.preview = self:Own(prettyui.Text.new(content, {
         text = "",
         x = MARGIN,
-        y = addTop + 74,
-        width = CONTENT_WIDTH,
+        y = ROWS_TOP,
+        width = self.contentWidth,
         height = 32,
         colour = PREVIEW_COLOUR,
         font = SMALL_FONT,
@@ -280,12 +314,12 @@ end
 -- Create one condition row's controls, shown when it has a condition
 function QueryEditor:BuildRow(index)
     local content = self.content
-    local top = ROWS_TOP + ROW_HEIGHT * (index - 1)
+    local top = ROWS_TOP + self.rowHeight * (index - 1)
     local slot = { kind = nil }
     -- Change this row's condition and refresh the preview
     local function edit(key, value)
         if not self.ready or self.syncing then return end
-        local rule = self.draft.rules[index]
+        local rule = self:Rule(index)
         if rule == nil then return end
         -- Native fields can echo a programmatic value on a later event
         if rule[key] == value then return end
@@ -301,33 +335,43 @@ function QueryEditor:BuildRow(index)
     slot.fieldBox = self:Own(prettyui.ComboBox.new(content, {
         x = MARGIN,
         y = top,
-        width = FIELD_WIDTH,
+        width = self.fieldWidth,
         height = CONTROL_HEIGHT,
         entries = entriesOf(self.fields),
         selectedID = choiceID(self.fields, "name"),
         onChange = function(_, entryID) self:ChooseField(index, entryID) end,
     }))
     slot.operatorBox = self:Own(prettyui.ComboBox.new(content, {
-        x = OPERATOR_X,
+        x = self.operatorX,
         y = top,
-        width = OPERATOR_WIDTH,
+        width = self.operatorWidth,
         height = CONTROL_HEIGHT,
         entries = entriesOf(self.operators.text),
         selectedID = choiceID(self.operators.text, "phrase"),
         onChange = function(_, entryID) self:ChooseOperator(index, entryID) end,
     }))
+    slot.negateButton = self:Own(prettyui.SimpleButton.new(content, id.Sprite.EXCLAMATION_MARK, function()
+        if not self.ready then return end
+        local rule = self:Rule(index)
+        if rule == nil then return end
+        rule.negate = not rule.negate
+        self:SyncRows()
+        self:Changed()
+    end, { x = self.negateX, y = top, width = CONTROL_HEIGHT, height = CONTROL_HEIGHT,
+        iconWidth = 10, iconHeight = 20,
+        tooltip = "Exclude this condition (NOT). Items without this field are excluded too." }))
     slot.kind = "text"
     slot.valueField = self:Own(prettyui.TextField.new(content, {
-        x = VALUE_X,
+        x = self.valueX,
         y = top,
-        width = VALUE_WIDTH,
+        width = self.valueWidth,
         height = CONTROL_HEIGHT,
         maxLength = QueryBuilder.MAX_TEXT_LENGTH,
         onChange = function(_, _, value) edit("value", value) end,
     }))
     slot.valueField.root:Subscribe(ui.Hook.ONCLICK, "advancedbanksearch_value_picker", function()
         if not self.ready or self.syncing then return false end
-        local rule = self.draft.rules[index]
+        local rule = self:Rule(index)
         local field = rule and QueryBuilder.FieldOf(rule.field)
         if field and field.catalog and field.kind == "text" and trim(rule.value) == "" then
             self:OpenPicker(index, "")
@@ -335,7 +379,7 @@ function QueryEditor:BuildRow(index)
         return false
     end)
     local clear = self:Own({ root = ui.Layer.new(content) })
-    clear.root:SetPos(VALUE_X + VALUE_WIDTH - 26, top)
+    clear.root:SetPos(self.valueX + self.valueWidth - 26, top)
     function clear:Destroy()
         prettyui.Tooltip.unbind(self)
         self.root:Destroy()
@@ -362,9 +406,9 @@ function QueryEditor:BuildRow(index)
     prettyui.Tooltip.bind(clear, clear.root, content, "Clear value")
     slot.clearButton = clear
     slot.minField = self:Own(prettyui.TextField.new(content, {
-        x = VALUE_X,
+        x = self.valueX,
         y = top,
-        width = BOUND_WIDTH,
+        width = self.boundWidth,
         height = CONTROL_HEIGHT,
         maxLength = 16,
         placeholder = "Low",
@@ -372,9 +416,9 @@ function QueryEditor:BuildRow(index)
     }))
     slot.andText = self:Own(prettyui.Text.new(content, {
         text = "and",
-        x = VALUE_X + BOUND_WIDTH,
+        x = self.valueX + self.boundWidth,
         y = top,
-        width = VALUE_WIDTH - BOUND_WIDTH * 2,
+        width = self.valueWidth - self.boundWidth * 2,
         height = CONTROL_HEIGHT,
         colour = HINT_COLOUR,
         font = SMALL_FONT,
@@ -383,23 +427,23 @@ function QueryEditor:BuildRow(index)
         alignVertical = ui.AlignMode.CENTRE,
     }))
     slot.maxField = self:Own(prettyui.TextField.new(content, {
-        x = VALUE_X + VALUE_WIDTH - BOUND_WIDTH,
+        x = self.valueX + self.valueWidth - self.boundWidth,
         y = top,
-        width = BOUND_WIDTH,
+        width = self.boundWidth,
         height = CONTROL_HEIGHT,
         maxLength = 16,
         placeholder = "High",
         onChange = function(_, _, value) edit("max", value) end,
     }))
-    slot.removeButton = self:Own(prettyui.SimpleButton.new(content, "Remove", function()
+    slot.removeButton = self:Own(prettyui.SimpleButton.new(content, id.Sprite.HUD_COMBAT_BTN_BIN, function()
         self:RemoveRule(index)
-    end, { x = REMOVE_X, y = top, width = REMOVE_WIDTH, height = CONTROL_HEIGHT }))
+    end, { x = MARGIN + self.contentWidth - CONTROL_HEIGHT, y = top, width = CONTROL_HEIGHT, height = CONTROL_HEIGHT, tooltip = "Remove condition" }))
     return slot
 end
 
 -- Create a reusable grid for catalog choices
 function QueryEditor:BuildPicker()
-    local width = math.floor((CONTENT_WIDTH - 18) / PICKER_COLUMNS)
+    local width = math.floor((self.contentWidth - 18) / self.pickerColumns)
     for index = 1, PICKER_PAGE_SIZE do
         local button = self:Own(prettyui.SimpleButton.new(self.content, "", function()
             self:ChooseValue(index)
@@ -423,7 +467,7 @@ end
 function QueryEditor:OpenPicker(index, filter)
     if not self.ready then return end
     if type(self.catalog) ~= "table" or type(self.catalog.Values) ~= "function" then return end
-    local rule = self.draft.rules[index]
+    local rule = self:Rule(index)
     local values, _, reason = self.catalog.Values(rule.field, { query = filter or "" })
     self.pickerValues = values or {}
     self.pickerIndex = #self.pickerValues > 0 and index or nil
@@ -436,7 +480,7 @@ end
 function QueryEditor:ChooseValue(index)
     if not self.ready then return end
     local value = self.pickerValues[(self.pickerPage - 1) * PICKER_PAGE_SIZE + index]
-    local rule = self.pickerIndex and self.draft.rules[self.pickerIndex]
+    local rule = self.pickerIndex and self:Rule(self.pickerIndex)
     if value == nil or rule == nil then return end
     rule.value = tostring(value.value)
     self.pickerIndex = nil
@@ -447,17 +491,20 @@ end
 -- Position the visible page of catalog choices
 function QueryEditor:LayoutPicker(top, shown)
     local offset = (self.pickerPage - 1) * PICKER_PAGE_SIZE
-    local width = math.floor((CONTENT_WIDTH - 18) / PICKER_COLUMNS)
+    local width = math.floor((self.contentWidth - 18) / self.pickerColumns)
     local count = math.min(PICKER_PAGE_SIZE, #self.pickerValues - offset)
-    local rows = math.ceil(math.max(0, count) / PICKER_COLUMNS)
+    local rows = math.ceil(math.max(0, count) / self.pickerColumns)
     for index, button in ipairs(self.pickerButtons) do
         local value = self.pickerValues[offset + index]
+        -- Hiding a hovered button does not deliver mouse-leave in the client.
+        -- Remove the overlay attachment before hiding or repurposing the button.
+        button:SetTooltip(nil)
         setHidden(button, not shown or value == nil)
         if value ~= nil then
             button.content.content = value.label
-            button:SetTooltip(value.label)
-            button.root:SetPos(MARGIN + ((index - 1) % PICKER_COLUMNS) * (width + 6),
-                top + math.floor((index - 1) / PICKER_COLUMNS) * PICKER_ROW_HEIGHT)
+            if shown then button:SetTooltip(value.label) end
+            button.root:SetPos(MARGIN + ((index - 1) % self.pickerColumns) * (width + 6),
+                top + math.floor((index - 1) / self.pickerColumns) * PICKER_ROW_HEIGHT)
         end
     end
     local paged = shown and #self.pickerValues > PICKER_PAGE_SIZE
@@ -486,7 +533,7 @@ function QueryEditor:BuildAdvanced(query)
         text = "Use OR between alternatives",
         x = MARGIN + 82,
         y = PANEL_TOP,
-        width = CONTENT_WIDTH - 82,
+        width = self.contentWidth - 82,
         height = 20,
         colour = HINT_COLOUR,
         font = SMALL_FONT,
@@ -496,7 +543,7 @@ function QueryEditor:BuildAdvanced(query)
     self.queryField = self:Own(prettyui.TextField.new(content, {
         x = MARGIN,
         y = PANEL_TOP + 22,
-        width = CONTENT_WIDTH,
+        width = self.contentWidth,
         height = QUERY_FIELD_HEIGHT,
         text = query,
         placeholder = "e.g. name:(vial AND water) OR name:\"dragon bones\"",
@@ -507,6 +554,8 @@ function QueryEditor:BuildAdvanced(query)
         font = SMALL_FONT,
         contentMargin = ui.Margin.new(8, 8, 8, 8),
         onChange = function(_, _, value)
+            if not self.ready then return end
+            self.queryText = tostring(value or "")
             self:UpdateCharacterCount(value)
             self:ClearStatus()
         end,
@@ -515,7 +564,7 @@ function QueryEditor:BuildAdvanced(query)
         text = "",
         x = MARGIN,
         y = PANEL_TOP + 22 + QUERY_FIELD_HEIGHT + 6,
-        width = CONTENT_WIDTH,
+        width = self.contentWidth,
         height = 18,
         colour = HINT_COLOUR,
         font = SMALL_FONT,
@@ -525,78 +574,141 @@ function QueryEditor:BuildAdvanced(query)
     self:UpdateCharacterCount(query)
 end
 
--- Show one mode's controls and light its button
+-- Show the mode selected through the plugin settings.
 function QueryEditor:ShowMode(mode)
     if not self.ready then return end
     self.mode = mode
-    self.confirmVisual = false
     for _, control in ipairs(self.visualControls) do setHidden(control, mode ~= "visual") end
     for _, control in ipairs(self.advancedControls) do setHidden(control, mode ~= "advanced") end
-    self.visualButton:SetActive(mode == "visual")
-    self.advancedButton:SetActive(mode == "advanced")
     self:SyncRows()
 end
 
 -- Switch to Advanced with the RuneQL the conditions give
 -- Incomplete conditions leave the typed text as it was
 function QueryEditor:ChooseAdvanced()
-    if not self.ready then return end
-    if self.mode == "advanced" then return end
+    if not self.ready or self.mode == "advanced" then return end
     local query, builder = QueryBuilder.Build(self.draft)
     self:ShowMode("advanced")
-    if query == nil then
-        self:SetStatus(INCOMPLETE)
-        return
+    if self.preservedAdvanced ~= nil and query == self.visualBaseline then
+        self.queryText = self.preservedAdvanced
+    elseif query ~= nil then
+        self.generated, self.generatedBuilder = query, builder
+        self.queryText = query
+        self.preservedAdvanced, self.visualBaseline = nil, nil
     end
-    self.generated, self.generatedBuilder = query, builder
-    self.queryField:SetText(query)
-    self:UpdateCharacterCount(query)
-    self:ClearStatus()
+    self.queryField:SetText(self.queryText)
+    self:UpdateCharacterCount(self.queryText)
+    if query == nil then self:SetStatus(INCOMPLETE) else self:ClearStatus() end
 end
 
--- Switch to Visual, asking first when it would replace typed RuneQL
+-- Selecting Visual is explicit in settings. Retain detached Advanced text until
+-- Save, or return to it when switching back without changing visual conditions.
 function QueryEditor:ChooseVisual()
-    if not self.ready then return end
-    if self.mode == "visual" then return end
+    if not self.ready or self.mode == "visual" then return end
     local text = self.queryField:GetText()
-    local linked = self.generated ~= nil and text == self.generated
-    if not linked and trim(text) ~= "" and not self.confirmVisual then
-        self.confirmVisual = true
-        self:SetStatus(LEAVE_TEXT)
-        return
+    local detached = trim(text) ~= "" and text ~= self.generated
+    if detached then
+        self.preservedAdvanced = text
+        self.visualBaseline = QueryBuilder.Build(self.draft)
     end
     self:ShowMode("visual")
     self:Changed()
+    if detached then self:SetStatus(REPLACE_TEXT) end
 end
 
--- Add a blank name condition below the others
-function QueryEditor:AddRule()
-    if not self.ready then return end
-    if #self.draft.rules >= QueryBuilder.MAX_RULES then return end
-    self.draft.rules[#self.draft.rules + 1] = QueryBuilder.NewRule()
+-- Resolve a displayed condition back to its nested group.
+function QueryEditor:Rule(index)
+    local row = self.ruleRows and self.ruleRows[index]
+    return row and row.rule
+end
+
+-- Add a condition to the chosen group (the root by default).
+function QueryEditor:AddRule(group)
+    if not self.ready or #self.ruleRows >= QueryBuilder.MAX_RULES then return end
+    group = group or self.draft
+    group.rules[#group.rules + 1] = QueryBuilder.NewRule()
     self.pickerIndex = nil
     self:SyncRows()
     self:Changed()
 end
 
--- Remove a condition, keeping at least one
+function QueryEditor:AddGroup(group, depth)
+    if not self.ready or #self.ruleRows >= QueryBuilder.MAX_RULES
+        or #self.groupRows >= QueryBuilder.MAX_RULES or depth >= 3 then return end
+    group.rules[#group.rules + 1] = { match = "any", rules = { QueryBuilder.NewRule() } }
+    self.pickerIndex = nil
+    self:SyncRows()
+    self:Changed()
+end
+
+-- Keep at least one condition in the query. Empty groups can be filled or removed.
 function QueryEditor:RemoveRule(index)
-    if not self.ready then return end
-    if #self.draft.rules <= 1 or self.draft.rules[index] == nil then return end
-    table.remove(self.draft.rules, index)
+    local row = self.ruleRows[index]
+    if not self.ready or #self.ruleRows <= 1 or row == nil then return end
+    table.remove(row.siblings, row.position)
     self.pickerIndex = nil
     self:SyncRows()
     self:Changed()
+end
+
+function QueryEditor:RemoveGroup(index)
+    local row = self.groupRows[index]
+    if not self.ready or row == nil then return end
+    table.remove(row.siblings, row.position)
+    local _, conditions = QueryBuilder.Rows(self.draft)
+    if #conditions == 0 then self.draft.rules[#self.draft.rules + 1] = QueryBuilder.NewRule() end
+    self.pickerIndex = nil
+    self:SyncRows()
+    self:Changed()
+end
+
+-- A group's actions stay together in its header, inside a visible group boundary.
+function QueryEditor:BuildGroupRow(index)
+    local slot = {}
+    local function rectangle(colour)
+        local control = self:Own({ root = ui.Rectangle.new(self.content) })
+        function control:Destroy() self.root:Destroy() end
+        control.root.fill, control.root.rgba, control.root.clickthrough = true, colour, true
+        return control
+    end
+    slot.background = rectangle(0x27231DFF)
+    slot.topEdge = rectangle(0x806432FF)
+    slot.bottomEdge = rectangle(0x806432FF)
+    slot.rightEdge = rectangle(0x806432FF)
+    slot.edge = rectangle(0x806432FF)
+    slot.matchBox = self:Own(prettyui.ComboBox.new(self.content, {
+        width = 206, height = CONTROL_HEIGHT, entries = entriesOf(MATCH_CHOICES), selectedID = 2,
+        onChange = function(_, entryID)
+            if not self.ready or self.syncing then return end
+            local row = self.groupRows[index]
+            if row == nil then return end
+            row.rule.match = MATCH_CHOICES[entryID] and MATCH_CHOICES[entryID].key or "all"
+            self:Changed()
+        end,
+    }))
+    slot.addButton = self:Own(prettyui.SimpleButton.new(self.content, id.Sprite.BP3_MISSION_PLUS_ICON, function()
+        local row = self.groupRows[index]
+        if row ~= nil then self:AddRule(row.rule) end
+    end, { width = CONTROL_HEIGHT, height = CONTROL_HEIGHT, iconSize = 18, tooltip = "Add condition to this group" }))
+    slot.groupButton = self:Own(prettyui.SimpleButton.new(self.content, id.Sprite.MTX_STORE_BTN_PLUS_ACTIVE, function()
+        local row = self.groupRows[index]
+        if row ~= nil then self:AddGroup(row.rule, row.depth + 1) end
+    end, { width = CONTROL_HEIGHT, height = CONTROL_HEIGHT, iconSize = 18, tooltip = "Add subgroup" }))
+    slot.removeButton = self:Own(prettyui.SimpleButton.new(self.content, id.Sprite.HUD_COMBAT_BTN_BIN, function()
+        self:RemoveGroup(index)
+    end, { width = 28, height = CONTROL_HEIGHT, tooltip = "Remove group and its conditions" }))
+    return slot
 end
 
 -- Change a condition's field, starting over when its kind changes
 function QueryEditor:ChooseField(index, entryID)
     if not self.ready then return end
-    local rule, field = self.draft.rules[index], self.fields[entryID]
+    local rule, field = self:Rule(index), self.fields[entryID]
     if rule == nil or field == nil or field.key == rule.field then return end
     local before = QueryBuilder.FieldOf(rule.field)
     if before == nil or before.kind ~= field.kind or field.catalog or before.catalog then
-        self.draft.rules[index] = QueryBuilder.NewRule(field.key)
+        local row = self.ruleRows[index]
+        row.siblings[row.position] = QueryBuilder.NewRule(field.key)
     else
         rule.field = field.key
     end
@@ -609,7 +721,7 @@ end
 -- Change how a condition compares its value
 function QueryEditor:ChooseOperator(index, entryID)
     if not self.ready then return end
-    local rule = self.draft.rules[index]
+    local rule = self:Rule(index)
     if rule == nil then return end
     local operator = self.operators[QueryBuilder.OperatorKind(rule.field)][entryID]
     if operator == nil or operator.key == rule.operator then return end
@@ -621,26 +733,70 @@ end
 -- Show each row's condition, hiding rows without one
 -- Suppress callbacks while reflecting saved conditions
 function QueryEditor:SyncRows()
-    if not self.ready then return end
-    if self.syncing then return end
+    if not self.ready or self.syncing then return end
     self.syncing = true
+    prettyui.Tooltip.hideContextTooltips(self.root)
     local visual = self.mode == "visual"
-    local count = #self.draft.rules
-    local pickerTop = ROWS_TOP + ROW_HEIGHT * (self.pickerIndex or 0)
-    local pickerHeight = self:LayoutPicker(pickerTop, visual and self.pickerIndex ~= nil)
+    local rows
+    rows, self.ruleRows, self.groupRows = QueryBuilder.Rows(self.draft)
+    local count = #self.ruleRows
+    local top, pickerTop, openGroups = ROWS_TOP, ROWS_TOP, {}
+    local function closeGroup()
+        local row = table.remove(openGroups)
+        row.bottom = top + GROUP_PADDING
+        top = row.bottom + GROUP_GAP
+    end
+    for _, row in ipairs(rows) do
+        -- Leave a visible closing border and gap before the next sibling.
+        while #openGroups > 0 and openGroups[#openGroups].depth >= row.depth do closeGroup() end
+        row.top = top
+        if row.groupIndex ~= nil then
+            row.top = top + GROUP_PADDING
+            row.boxTop = top
+            top = row.top + 34
+            openGroups[#openGroups + 1] = row
+        else
+            top = top + self.rowHeight
+            if self.pickerIndex == row.conditionIndex then
+                pickerTop = top
+                top = top + self:LayoutPicker(pickerTop, visual)
+            end
+        end
+    end
+    while #openGroups > 0 do closeGroup() end
+    if self.pickerIndex == nil then self:LayoutPicker(pickerTop, false) end
     for index, slot in ipairs(self.slots) do
-        local rule = self.draft.rules[index]
+        local row = self.ruleRows[index]
+        local rule = row and row.rule
         local shown = visual and rule ~= nil
-        local between, boolean = false, false
-        local clear = false
-        local top = ROWS_TOP + ROW_HEIGHT * (index - 1)
-        if self.pickerIndex ~= nil and index > self.pickerIndex then top = top + pickerHeight end
+        local between, boolean, clear = false, false, false
+        local rowTop = row and row.top or ROWS_TOP
         for _, control in ipairs({ slot.fieldBox, slot.operatorBox, slot.valueField, slot.minField,
-            slot.andText, slot.maxField, slot.removeButton, slot.clearButton }) do
+            slot.andText, slot.maxField, slot.removeButton, slot.clearButton, slot.negateButton }) do
             local node = control.root or control
-            node:SetPos(node.x, top)
+            local valueControl = control == slot.valueField or control == slot.minField
+                or control == slot.maxField or control == slot.andText or control == slot.clearButton
+            node:SetPos(node.x, rowTop + (self.narrow and valueControl and 34 or 0))
         end
         if rule ~= nil then
+            local indent = row.depth * 12
+            slot.fieldBox.root:SetPos(MARGIN + indent, rowTop)
+            slot.fieldBox.root:SetSize(self.fieldWidth - indent, CONTROL_HEIGHT)
+            local valueLeft = self.valueX + (self.narrow and indent or 0)
+            local inset = row.depth > 0 and GROUP_PADDING or 0
+            slot.operatorBox.root:SetSize(self.operatorWidth - inset, CONTROL_HEIGHT)
+            slot.negateButton.root:SetPos(self.negateX - inset, rowTop)
+            slot.removeButton.root:SetPos(MARGIN + self.contentWidth - CONTROL_HEIGHT - inset, rowTop)
+            local valueWidth = self.valueWidth - (self.narrow and indent or 0) - inset
+            local valueTop = rowTop + (self.narrow and 34 or 0)
+            local boundWidth = math.floor((valueWidth - 28) / 2)
+            slot.valueField.root:SetPos(valueLeft, valueTop)
+            slot.minField.root:SetPos(valueLeft, valueTop)
+            slot.minField.root:SetSize(boundWidth, CONTROL_HEIGHT)
+            slot.andText:SetPos(valueLeft + boundWidth, valueTop)
+            slot.maxField.root:SetPos(valueLeft + valueWidth - boundWidth, valueTop)
+            slot.maxField.root:SetSize(boundWidth, CONTROL_HEIGHT)
+            slot.clearButton.root:SetPos(valueLeft + valueWidth - 26, valueTop)
             local field = QueryBuilder.FieldOf(rule.field)
             local fieldIndex = choiceID(self.fields, rule.field)
             local operatorKind = QueryBuilder.OperatorKind(rule.field)
@@ -658,11 +814,12 @@ function QueryEditor:SyncRows()
             if slot.valueField:GetText() ~= rule.value then slot.valueField:SetText(rule.value) end
             slot.valueField:SetPlaceholder(field.kind == "text"
                 and (field.catalog and "Choose a value" or "Words in the name") or "Number")
-            slot.valueField.root:SetSize(VALUE_WIDTH, CONTROL_HEIGHT)
+            slot.valueField.root:SetSize(valueWidth, CONTROL_HEIGHT)
             slot.valueField.root.contentMargin = ui.Margin.new(8, 3, clear and 32 or 8, 0)
             slot.minField:SetText(rule.min)
             slot.maxField:SetText(rule.max)
             slot.removeButton:SetDisabled(count <= 1)
+            slot.negateButton:SetActive(rule.negate == true)
         end
         setHidden(slot.fieldBox, not shown)
         setHidden(slot.operatorBox, not shown)
@@ -671,13 +828,44 @@ function QueryEditor:SyncRows()
         setHidden(slot.andText, not shown or not between)
         setHidden(slot.maxField, not shown or not between)
         setHidden(slot.removeButton, not shown)
+        setHidden(slot.negateButton, not shown)
         setHidden(slot.clearButton, not shown or not clear)
     end
+    for index, slot in ipairs(self.groupSlots) do
+        local row = self.groupRows[index]
+        local shown = visual and row ~= nil
+        for _, control in pairs(slot) do setHidden(control, not shown) end
+        if row ~= nil then
+            local left = MARGIN + row.depth * 12 + GROUP_PADDING
+            local matchWidth = math.min(206, self.contentWidth - row.depth * 12 - GROUP_PADDING * 2 - 114)
+            slot.matchBox.root:SetPos(left, row.top)
+            slot.matchBox.root:SetSize(matchWidth, CONTROL_HEIGHT)
+            slot.matchBox:Select(row.rule.match == "any" and 2 or 1, false)
+            slot.addButton.root:SetPos(left + matchWidth + 6, row.top)
+            slot.groupButton.root:SetPos(left + matchWidth + 40, row.top)
+            slot.removeButton.root:SetPos(left + matchWidth + 74, row.top)
+            slot.addButton:SetDisabled(count >= QueryBuilder.MAX_RULES)
+            slot.groupButton:SetDisabled(count >= QueryBuilder.MAX_RULES or #self.groupRows >= QueryBuilder.MAX_RULES
+                or row.depth + 1 >= 3)
+            local boxLeft, boxTop = left - GROUP_PADDING, row.boxTop
+            local boxWidth = self.contentWidth - row.depth * 12
+            local boxHeight = row.bottom - boxTop + 1
+            slot.background.root:SetPos(boxLeft, boxTop)
+            slot.background.root:SetSize(boxWidth, boxHeight)
+            slot.topEdge.root:SetPos(boxLeft, boxTop)
+            slot.topEdge.root:SetSize(boxWidth, 1)
+            slot.bottomEdge.root:SetPos(boxLeft, row.bottom)
+            slot.bottomEdge.root:SetSize(boxWidth, 1)
+            slot.edge.root:SetPos(boxLeft, boxTop)
+            slot.edge.root:SetSize(1, boxHeight)
+            slot.rightEdge.root:SetPos(boxLeft + boxWidth - 1, boxTop)
+            slot.rightEdge.root:SetSize(1, boxHeight)
+        end
+    end
     self.addButton:SetDisabled(count >= QueryBuilder.MAX_RULES)
-    local addTop = ROWS_TOP + ROW_HEIGHT * count + pickerHeight + 4
-    self.addButton.root:SetPos(MARGIN, addTop)
-    self.preview:SetPos(MARGIN, addTop + 40)
-    self.body:SetContentHeight(visual and addTop + 80 or PANEL_TOP + 22 + QUERY_FIELD_HEIGHT + 30)
+    self.addGroupButton:SetDisabled(count >= QueryBuilder.MAX_RULES or #self.groupRows >= QueryBuilder.MAX_RULES)
+    self.preview:SetPos(MARGIN, top + 10)
+    self.body:SetContentHeight(visual and top + 50 or PANEL_TOP + 22 + QUERY_FIELD_HEIGHT + 30)
     self.syncing = false
 end
 
@@ -700,8 +888,17 @@ end
 
 -- Show validation feedback, hiding the message when it is empty
 function QueryEditor:SetStatus(value)
+    self.statusText = value
     self.status.content = tostring(value or "")
     self.status.hidden = value == nil or value == ""
+    -- Reserve feedback space only while there is a message to display.
+    local messageHeight = self.status.hidden and 0 or STATUS_HEIGHT
+    local height = FOOTER_HEIGHT + messageHeight
+    self.footer.root:SetPos(0, -height, 0, 1.0)
+    self.footer.root:SetSize(self.width, height)
+    self.body.root:SetSize(self.width, math.max(1, self.root.height - height))
+    self.cancelButton.root:SetPos(MARGIN, BUTTONS_TOP + messageHeight)
+    self.saveButton.root:SetPos(self.saveButton.root.x, BUTTONS_TOP + messageHeight)
 end
 
 -- Hide feedback once the player changes something
@@ -709,8 +906,7 @@ end
 function QueryEditor:ClearStatus()
     if not self.ready then return end
     if self.status == nil or self.blocked ~= nil then return end
-    self.confirmVisual = false
-    self.status.hidden = true
+    self:SetStatus(nil)
 end
 
 -- Send the name, query, and conditions to save, closing on success
@@ -730,21 +926,38 @@ function QueryEditor:Save()
         query = self.queryField:GetText()
         builder = query == self.generated and self.generatedBuilder or nil
     end
-    local saved, reason = self.onSave(self.queryID, self.nameField:GetText(), query, builder)
+    local saved, reason = self.onSave(self.queryID, self.nameField:GetText(), query, builder, self.spriteObjectID)
     if saved then
-        self.window:Close()
+        self:Close(true)
     else
         self:SetStatus(reason or "Could not save the RuneQL query.")
     end
 end
 
--- Show the existing editor window
-function QueryEditor:Show()
+-- Preview an item icon until the query itself is saved.
+function QueryEditor:SetSprite(objectID)
     if not self.ready then return end
-    self.window:Show()
+    self.spriteObjectID = math.tointeger(tonumber(objectID))
+    self.spriteSlot:SetObject(ObjectConfig.FromID(self.spriteObjectID))
+    self.spriteSlot:SetTooltip("Click to edit")
 end
 
--- Destroy the editor's controls and window
+-- Capture edits before Core replaces its custom-view layers on resize or refresh.
+function QueryEditor:Snapshot()
+    return { name = self.nameText, query = self.queryText, spriteObjectID = self.spriteObjectID,
+        draft = self.draft, mode = self.mode, generated = self.generated, generatedBuilder = self.generatedBuilder,
+        pickerIndex = self.pickerIndex, pickerPage = self.pickerPage, pickerValues = self.pickerValues,
+        preservedAdvanced = self.preservedAdvanced, visualBaseline = self.visualBaseline, status = self.statusText,
+        scrollY = self.body.scrollY or 0 }
+end
+
+-- Finish editing through the owning bank view.
+function QueryEditor:Close(saved)
+    if not self.ready then return end
+    if self.onClose ~= nil then self.onClose(saved == true) else self:Destroy() end
+end
+
+-- Destroy controls and their tooltip contexts before Core retires the view layers
 function QueryEditor:Destroy()
     if self.destroyed then return end
     self.destroyed, self.ready = true, false
@@ -752,11 +965,14 @@ function QueryEditor:Destroy()
         local control = self.owned[index]
         pcall(function() control:Destroy() end)
     end
-    local window = self.window
-    self.owned, self.visualControls, self.advancedControls, self.slots = {}, {}, {}, {}
-    self.window, self.onSave, self.catalog = nil, nil, nil
+    local root = self.root
+    self.owned, self.visualControls, self.advancedControls, self.slots, self.groupSlots = {}, {}, {}, {}, {}
+    self.root, self.onSave, self.onClose, self.catalog = nil, nil, nil
     self.pickerButtons, self.pickerValues = {}, {}
-    if window ~= nil then pcall(function() window:Destroy() end) end
+    if root ~= nil then
+        pcall(function() prettyui.Tooltip.unregisterContext(root) end)
+        pcall(function() root:Destroy() end)
+    end
 end
 
 return QueryEditor

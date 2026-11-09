@@ -1,6 +1,12 @@
 -- Show RuneQL search and saved queries through Bank Core's API
 -- RuneQL and GE Prices are read only while reported loaded
 
+local ImportShare = require("resources/search/import_share")
+local QueryCode = require("resources/search/query_code")
+local IconCatalog = require("resources/search/icon_catalog")
+local IconPicker = require("resources/search/icon_picker")
+local NameIconEditor = require("resources/search/name_icon_editor")
+local ConfirmWindow = require("resources/search/confirm_window")
 local FolderDialog = require("resources/search/folder_dialog")
 local ItemFields = require("resources/search/item_fields")
 local QueryBuilder = require("resources/search/query_builder")
@@ -93,6 +99,8 @@ function App.new()
         counts = {},
         -- The page last given to Bank Core: SEARCH_PAGE or QUERY_PAGE
         pageID = nil,
+        -- Once resolved, keep page membership until an explicit page reload.
+        pageHasResults = false,
         -- The shown page's price wait, and whether it gave up; a new page waits afresh
         priceWait = nil,
         pricesFailed = false,
@@ -106,6 +114,10 @@ function App.new()
     app.tab = SearchTab.new(app)
     app.menus = QueryMenus.new(app)
     app.settings.onChange = function(key)
+        if key == "editorMode" and app.editor ~= nil then
+            if app.settings.values.editorMode == "advanced" then app.editor:ChooseAdvanced()
+            else app.editor:ChooseVisual() end
+        end
         if key == "includePlaceholders" and app:ShownPage() == SEARCH_PAGE then app:RefreshPage() end
         if key == "searchDelayTicks" and app.searchWait ~= nil then
             app:StopSearchWait()
@@ -125,7 +137,7 @@ end
 -- Return the GE price service while it is reported loaded
 function App:Prices()
     if not self.enabled.geprices then return nil end
-    return findDependency(geprices, "geprices", "getPrice")
+    return findDependency(gepl, "geprices", "getPrice")
 end
 
 -- Connect to Bank Core if it runs
@@ -169,6 +181,10 @@ function App:Disconnect()
     self:StopPriceWait()
     self:CloseEditor()
     self:CloseFolderDialog()
+    self:CloseAppearance()
+    self:CloseIconPicker()
+    self:CloseDeleteConfirm()
+    self:CloseImportShare()
     local ext = self.ext
     self.ext, self.items, self.pageID = nil, nil, nil
     if self.status == self.bankStateError then self:ShowStatus(nil) end
@@ -178,9 +194,12 @@ end
 
 -- Follow a dependency loading or unloading
 function App:DependencyChanged(name, enabled)
+    if name == "gepl" then name = "geprices" end
     if self.enabled[name] == nil then return end
     self.enabled[name] = enabled == true
     if name == "runeql" then
+        IconCatalog.SetRuneQLEnabled(enabled)
+        self:CloseIconPicker()
         self:CloseEditor()
         QueryBuilder.SetCatalog(self:RuneQL())
         if not enabled and self.ext ~= nil then self.ext:Close() end
@@ -221,8 +240,11 @@ function App:OnBankStateChanged(state)
         self:StopPriceWait()
         if self.ext:IsOpen() then self.ext:Close() end
         self.pageID = nil
-        if hadResults then self:ShowBankStateError(blocked) end
-    elseif self.bankStateError ~= nil then
+        if hadResults and not self.statusIsError then self:ShowStatus(nil) end
+    end
+    -- State changes retire results silently. Only an attempted opening warns.
+    -- Retain that warning while its restriction remains, then clear it.
+    if self.bankStateError ~= nil and self.bankStateError ~= OPEN_REFUSALS[blocked] then
         if self.status == self.bankStateError then self:ShowStatus(nil) end
         self.bankStateError = nil
     end
@@ -236,10 +258,11 @@ function App:ShowBankStateError(reason)
     self:ShowStatus(self.bankStateError, true)
 end
 
--- Rank the last page again for the bank's new items
+-- Core updates quantities and draws missing stacks as ghosts without changing slots.
+-- Only unresolved pages need another search when bank items first become readable.
 function App:OnBankItems()
     self:ReadBank()
-    self:RefreshPage()
+    if not self.pageHasResults then self:RefreshPage() end
 end
 
 -- Drop the last bank read, typed search, and windows when the bank closes
@@ -248,6 +271,9 @@ function App:OnBankClose()
     self:StopSearchWait()
     self:CloseEditor()
     self:CloseFolderDialog()
+    self:CloseAppearance()
+    self:CloseIconPicker()
+    self:CloseDeleteConfirm()
 end
 
 -- Read the bank, keeping the last items while Core is busy or outside All Items
@@ -317,6 +343,7 @@ function App:SetPage(pageID)
         return false
     end
     self.pageID = pageID
+    self.pageHasResults = outcome.state == "ok"
     return true, outcome
 end
 
@@ -463,14 +490,14 @@ end
 -- Open the editor for a new query
 function App:NewQuery()
     self.confirmDelete = nil
-    self:OpenEditor(nil)
+    return self:OpenEditor(nil)
 end
 
 -- Open the editor for a query, the chosen one by default
 function App:EditQuery(queryID)
     self.confirmDelete = nil
     local record = self.queries:Get(queryID or self.selectedQuery)
-    if record ~= nil then self:OpenEditor(record) end
+    if record ~= nil then return self:OpenEditor(record) end
 end
 
 -- Delete the chosen query when Delete is pressed twice
@@ -509,36 +536,72 @@ local function windowParent()
         or ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
 end
 
--- Open the query editor, replacing any open one
+-- Draw query editing in a separate, rail-less Core view so search result pages
+-- keep their own registration and can be restored when editing ends.
 function App:OpenEditor(record)
+    local returnPage = self.editorReturnPage or self:ShownPage()
     self:CloseEditor()
     self:CloseFolderDialog()
-    local parent = windowParent()
-    if parent == nil then return false end
+    self:CloseAppearance()
+    if self.ext == nil then return false end
+    local blocked = bankStateBlocker(self.ext:GetBankState())
+    if blocked ~= nil then self:ShowBankStateError(blocked); return false, blocked end
+    local api = findDependency(bankcore, "bankcore", "Register")
+    if api == nil then return false end
+    self:StopSearchWait()
+    self:StopPriceWait()
     local engine = self:RuneQL()
-    local editor
-    editor = QueryEditor.new(parent, {
+    local options = {
         record = record,
-        defaultMode = self.settings.values.editorMode,
+        editorMode = self.settings.values.editorMode,
         catalog = engine and engine.Catalog,
         blocked = engine == nil and NEEDS_RUNEQL or nil,
-        onSave = function(queryID, name, query, builder)
-            return self:SaveQuery(queryID, name, query, builder)
+        onSave = function(queryID, name, query, builder, spriteObjectID)
+            return self:SaveQuery(queryID, name, query, builder, spriteObjectID)
         end,
+        onChooseSprite = function(owner) self:OpenIconPicker(owner) end,
         onClose = function()
-            if self.editor == editor then self.editor = nil end
+            self:CloseEditor()
+            if returnPage ~= nil then self:ShowPage(returnPage) end
+            self:Refresh()
+        end,
+    }
+    local ext, reason = api.Register({
+        id = OWNER_ID .. ".editor", name = "Query builder",
+        customView = function(view)
+            if self.editor ~= nil then
+                options.state = self.editor:Snapshot()
+                if self.iconPickerOwner == self.editor then self:CloseIconPicker() end
+                self.editor:Destroy()
+                self.editor = nil
+            end
+            options.width, options.height, options.overlay = view.width, view.height, view.overlay
+            self.editor = QueryEditor.new(view.parent, options)
+            return view.height
+        end,
+        onClose = function() self:CloseEditor() end,
+        onBankClose = function() self:CloseEditor() end,
+        onBankStateChanged = function(state)
+            if bankStateBlocker(state) ~= nil then self:CloseEditor() end
         end,
     })
-    self.editor = editor
-    editor:Show()
+    if ext == nil then return false, reason end
+    self.editorExt = ext
+    self.editorReturnPage = returnPage
+    local opened, openReason = ext:Open()
+    if not opened then self:CloseEditor(); return false, openReason end
     return true
 end
 
--- Close the query editor
+-- Release controls, overlay tooltips and the bank view together. Clear references
+-- first because disposing the view can itself schedule a close notification.
 function App:CloseEditor()
-    local editor = self.editor
-    self.editor = nil
+    local editor, ext = self.editor, self.editorExt
+    if editor ~= nil and self.iconPickerOwner == editor then self:CloseIconPicker() end
+    self.editor, self.editorExt = nil, nil
+    self.editorReturnPage = nil
     if editor ~= nil then pcall(function() editor:Destroy() end) end
+    if ext ~= nil then pcall(function() ext:Dispose() end) end
 end
 
 -- Open a folder dialog, replacing the editor or a dialog already open
@@ -564,12 +627,11 @@ function App:CloseFolderDialog()
     if dialog ~= nil then pcall(function() dialog:Destroy() end) end
 end
 
--- Choose a query's folder, no folder, or a new folder
+-- Older PrettyUI builds have no submenu controller; keep folder moves available.
 function App:OpenFolderChooser(queryID)
     local record = self.queries:Get(queryID)
     if record == nil then return false end
-    local current = self.queries:FolderOf(queryID)
-    local choices = {}
+    local current, choices = self.queries:FolderOf(queryID), {}
     if current ~= nil then choices[1] = { id = "", label = "No folder" } end
     for _, folder in ipairs(self.queries:Folders()) do
         if folder.id ~= current then choices[#choices + 1] = { id = folder.id, label = folder.name } end
@@ -580,12 +642,150 @@ function App:OpenFolderChooser(queryID)
         onSave = function(name) return self:CreateFolder(name, queryID) end })
 end
 
--- Rename a folder through the folder dialog
-function App:OpenRenameFolder(folderID)
-    local folder = self.queries:GetFolder(folderID)
-    if folder == nil then return false end
-    return self:OpenFolderDialog({ title = "Rename Folder", heading = folder.name, text = folder.name,
-        onSave = function(name) return self:RenameFolder(folderID, name) end })
+-- Create a folder from the same row-menu action used by Bank Tags.
+function App:OpenCreateFolderPrompt(queryID)
+    if self.queries:Get(queryID) == nil then return false end
+    return self:OpenFolderDialog({ title = "Create Folder", heading = "Folder name", placeholder = "Folder name",
+        saveLabel = "Create", onSave = function(name) return self:CreateFolder(name, queryID) end })
+end
+
+function App:CloseDeleteConfirm()
+    local confirm = self.deleteConfirm
+    self.deleteConfirm = nil
+    if confirm ~= nil then confirm:Destroy() end
+end
+
+function App:OpenDeleteConfirm(queryID)
+    self:CloseDeleteConfirm()
+    local parent, record = windowParent(), self.queries:Get(queryID)
+    if parent == nil or record == nil then return false end
+    self.deleteConfirm = ConfirmWindow.new(parent, {
+        title = "Delete Query", message = 'Delete "' .. record.name .. '"?<br><br>Do you wish to continue?',
+        onConfirm = function()
+            if self.queries:Get(queryID) == nil then return false, "That query no longer exists." end
+            self.selectedQuery, self.confirmDelete = queryID, queryID
+            return self:DeleteQuery()
+        end,
+        onClose = function() self:CloseDeleteConfirm() end,
+    })
+    self.deleteConfirm:Show()
+    return true
+end
+
+-- The same name-and-item-slot editor Bank Tags uses for tags and folders.
+function App:OpenAppearance(kind, entryID)
+    self:CloseAppearance()
+    local parent = windowParent()
+    local record, spriteObjectID
+    if kind == "folder" then
+        record, spriteObjectID = self.queries:GetFolder(entryID), self.queries:GetFolderSprite(entryID)
+    else
+        record, spriteObjectID = self.queries:Get(entryID), self.queries:GetQuerySprite(entryID)
+    end
+    if parent == nil or record == nil then return false end
+    local editor
+    editor = NameIconEditor.new(parent, {
+        title = kind == "folder" and "Rename Folder" or "Rename Query",
+        nameLabel = kind == "folder" and "Folder name" or "Query name", tag = record.name,
+        spriteObjectID = spriteObjectID,
+        onChooseSprite = function()
+            if self.appearanceEditor == editor then self:OpenIconPicker(editor) end
+        end,
+        onSave = function(name, spriteObjectID)
+            if kind == "folder" then return self:RenameFolder(entryID, name, spriteObjectID) end
+            local current = self.queries:Get(entryID)
+            if current == nil then return false, "That query no longer exists." end
+            local ok, saved, reason = self.queries:Save(entryID, name, current.query, current.builder, spriteObjectID)
+            if not ok then return false, reason end
+            if self.editor ~= nil and self.editor.queryID == entryID then
+                self.editor.nameField:SetText(saved.name)
+                self.editor.nameText = saved.name
+                self.editor:SetSprite(self.queries:GetQuerySprite(entryID))
+            end
+            if self.pageID == QUERY_PAGE and self.pageQuery == entryID then self:RefreshPage() end
+            self:Refresh()
+            return true
+        end,
+        onClose = function() if self.appearanceEditor == editor then self:CloseAppearance() end end,
+    })
+    self.appearanceEditor = editor
+    editor:Show()
+    return true
+end
+
+function App:OpenRenameFolder(folderID) return self:OpenAppearance("folder", folderID) end
+function App:OpenRenameQuery(queryID) return self:OpenAppearance("query", queryID) end
+
+function App:CloseAppearance()
+    local editor = self.appearanceEditor
+    self.appearanceEditor = nil
+    if editor == nil then return end
+    if self.iconPickerOwner == editor then self:CloseIconPicker() end
+    editor:Destroy()
+end
+
+function App:OpenIconPicker(owner, onSelected)
+    if owner == nil or (owner ~= self.editor and owner ~= self.appearanceEditor and owner ~= self.importShare) then return false end
+    self:CloseIconPicker()
+    local parent = windowParent()
+    if parent == nil then return false end
+    self.iconPickerOwner = owner
+    local picker
+    picker = IconPicker.new(parent, {
+        bankItems = function() return self:ReadBank() end,
+        onSelect = function(result)
+            if self.iconPickerOwner == owner and (self.editor == owner or self.appearanceEditor == owner or self.importShare == owner) then
+                if onSelected ~= nil then onSelected(result.objectId) else owner:SetSprite(result.objectId) end
+            end
+        end,
+        onClose = function() if self.iconPicker == picker then self:CloseIconPicker() end end,
+    })
+    self.iconPicker = picker
+    picker:Show()
+    return true
+end
+
+function App:CloseIconPicker()
+    local picker = self.iconPicker
+    self.iconPicker, self.iconPickerOwner = nil, nil
+    if picker ~= nil then picker:Destroy() end
+end
+
+-- Reuse Bank Tags' consolidated Import / Share window and icon picker flow.
+function App:OpenImportShare()
+    self:CloseImportShare()
+    local parent = windowParent()
+    if parent == nil then return false end
+    local window
+    window = ImportShare.new(parent, {
+        onGetQueryExports = function() return self.queries:QueryExports() end,
+        onGetFolders = function() return self.queries:Folders() end,
+        onDecode = function(source) return QueryCode.Decode(source, self:RuneQL()) end,
+        onChooseImportSprite = function(onSelected)
+            if self.importShare == window then self:OpenIconPicker(window, onSelected) end
+        end,
+        onImport = function(source, overrides)
+            local saved, summary, reason = self.queries:ImportText(source, overrides, self:RuneQL())
+            if not saved then return false, nil, reason end
+            self.counts = {}
+            -- Refresh results without opening a page or changing the active editor's draft.
+            self:RefreshPage()
+            self:Refresh()
+            return true, summary
+        end,
+        onClose = function() if self.importShare == window then self:CloseImportShare() end end,
+    })
+    self.importShare = window
+    window:Show()
+    return true
+end
+
+function App:CloseImportShare()
+    local window = self.importShare
+    self.importShare = nil
+    if window == nil then return end
+    if self.iconPickerOwner == window then self:CloseIconPicker() end
+    window:Destroy()
 end
 
 -- Redraw after a folder or order change and report any refusal
@@ -614,8 +814,8 @@ function App:CreateFolder(name, queryID)
 end
 
 -- Rename a folder
-function App:RenameFolder(folderID, name)
-    return self:FolderChanged(false, self.queries:RenameFolder(folderID, name))
+function App:RenameFolder(folderID, name, spriteObjectID)
+    return self:FolderChanged(false, self.queries:RenameFolder(folderID, name, spriteObjectID))
 end
 
 -- Remove a folder, keeping its queries
@@ -623,20 +823,20 @@ function App:UngroupFolder(folderID)
     return self:FolderChanged(true, self.queries:DeleteFolder(folderID))
 end
 
--- Move a folder or query one step among its siblings
-function App:MoveEntry(kind, entryID, offset)
-    return self:FolderChanged(true, self.queries:Move(kind, entryID, offset))
+-- Save one drag placement among sibling queries or top-level folder blocks.
+function App:ReorderEntry(source, target, after)
+    return self:FolderChanged(true, self.queries:Reorder(source, target, after))
 end
 
 -- Save a query from the editor once RuneQL can read it
 -- Visual conditions are kept only when they give the same text
 -- A saved query is counted again when its page shows
-function App:SaveQuery(queryID, name, query, builder)
+function App:SaveQuery(queryID, name, query, builder, spriteObjectID)
     local engine = self:RuneQL()
     if engine == nil then return false, NEEDS_RUNEQL end
     local plan, queryReason = engine.Compile(query)
     if plan == nil then return false, tostring(queryReason or "RuneQL could not read this query.") end
-    local saved, record, reason = self.queries:Save(queryID, name, query, builder)
+    local saved, record, reason = self.queries:Save(queryID, name, query, builder, spriteObjectID)
     if not saved then return false, reason end
     self.counts[record.id] = nil
     self.selectedQuery = record.id
@@ -646,15 +846,17 @@ function App:SaveQuery(queryID, name, query, builder)
     return true
 end
 
--- Show a line in the column's status, or clear it with nil
+-- Show warnings over the bank title, using Bank Tags' notice layout.
 function App:ShowStatus(text, isError)
     self.status = text
     self.statusIsError = isError == true
+    self.tab:RefreshStatus()
 end
 
 -- Redraw the column
 function App:Refresh()
     self.tab:Refresh()
+    if self.importShare ~= nil and not self.importShare.closed then self.importShare:RefreshExports() end
 end
 
 -- Release the menus, windows, waits, and registration

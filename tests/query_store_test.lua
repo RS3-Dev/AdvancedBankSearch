@@ -103,13 +103,14 @@ assert(tree(folders) == "Gems Smithing[Ores,Bars] Empty[]", tree(folders))
 assert(select(2, folders:MoveToFolder("1", "99")) == "That folder no longer exists.")
 assert(select(2, folders:MoveToFolder("99", smithing)) == "That RuneQL query no longer exists.")
 
--- Reordering moves one step among siblings
-assert(folders:Move("folder", smithing, -1) and tree(folders) == "Smithing[Ores,Bars] Gems Empty[]", tree(folders))
-assert(folders:Move("query", "1", -1) and tree(folders) == "Smithing[Bars,Ores] Gems Empty[]", tree(folders))
-local edge, edgeReason = folders:Move("query", "1", -1)
+-- Reordering inserts a dragged entry before/after a sibling, never across folders.
+local function entry(kind,id) return {kind=kind,id=id} end
+assert(folders:Reorder(entry("folder",smithing),entry("query","3"),false) and tree(folders) == "Smithing[Ores,Bars] Gems Empty[]", tree(folders))
+assert(folders:Reorder(entry("query","1"),entry("query","2"),false) and tree(folders) == "Smithing[Bars,Ores] Gems Empty[]", tree(folders))
+local edge, edgeReason = folders:Reorder(entry("query","1"),entry("query","2"),false)
 assert(not edge and edgeReason == nil and tree(folders) == "Smithing[Bars,Ores] Gems Empty[]")
-assert(folders:Move("query", "3", 1) and tree(folders) == "Smithing[Bars,Ores] Empty[] Gems", tree(folders))
-assert(select(2, folders:Move("folder", "99", 1)) == "That entry no longer exists.")
+assert(folders:Reorder(entry("query","3"),entry("folder",empty),true) and tree(folders) == "Smithing[Bars,Ores] Empty[] Gems", tree(folders))
+assert(select(2, folders:Reorder(entry("folder","99"),entry("folder",empty),true)) == "That entry no longer exists.")
 
 -- Renaming keeps the folder's ID and members; collapsing is saved
 assert(folders:RenameFolder(smithing, "Metal") and folders:GetFolder(smithing).name == "Metal")
@@ -141,7 +142,7 @@ refuse = true
 local published = values["advancedbanksearch:queries:v1:manifest"]
 local before = tree(folders)
 assert(not folders:CreateFolder("Other", "1") and not folders:MoveToFolder("1", newer))
-assert(not folders:Move("query", "1", 1) and not folders:RenameFolder(newer, "Renamed"))
+assert(not folders:Reorder(entry("query","1"),entry("query","3"),true) and not folders:RenameFolder(newer, "Renamed"))
 assert(not folders:DeleteFolder(newer) and not folders:SetFolderCollapsed(newer, true))
 assert(tree(folders) == before and values["advancedbanksearch:queries:v1:manifest"] == published, tree(folders))
 refuse = false

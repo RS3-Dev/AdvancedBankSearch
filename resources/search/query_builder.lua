@@ -8,7 +8,7 @@ local MAX_TEXT_LENGTH = 100
 local MAX_NUMBER = 2147483647
 local VISUAL_FIELDS = {
     name = true, qty = true, price = true, category = true, skills = true, types = true,
-    combatStyle = true, slot = true, tier = true, tradeable = true, augmented = true,
+    combatStyle = true, slot = true, tier = true, tradeable = true, augmented = true, dose = true,
 }
 -- Field order is the order the editor lists them
 local FIELDS = {
@@ -87,7 +87,9 @@ end
 
 -- Keep unsupported older comparisons in Advanced
 function QueryBuilder.SupportsVisual(builder)
-    for _, rule in ipairs(builder.rules) do
+    local _, conditions = QueryBuilder.Rows(builder)
+    for _, row in ipairs(conditions) do
+        local rule = row.rule
         if operatorOf(QueryBuilder.OperatorKind(rule.field), rule.operator) == nil then return false end
     end
     return true
@@ -203,19 +205,66 @@ end
 -- Build RuneQL from conditions, or return nil and why not
 -- Also returns the conditions in the form saved with a query
 function QueryBuilder.Build(builder)
-    if type(builder) ~= "table" or (builder.match ~= "all" and builder.match ~= "any") then
-        return nil, nil, "Choose whether all or any conditions must match."
+    local count, groups = 0, 0
+    local function buildGroup(group, depth)
+        if depth > 3 then return nil, nil, "Use at most 3 nested group levels, or Advanced for more." end
+        if type(group) ~= "table" or (group.match ~= "all" and group.match ~= "any") then
+            return nil, nil, "Choose whether all or any conditions must match."
+        end
+        local rules = type(group.rules) == "table" and group.rules or {}
+        if #rules == 0 then return nil, nil, "Add at least one condition to each group." end
+        local clauses, saved = {}, { match = group.match, rules = {} }
+        for position, rule in ipairs(rules) do
+            local clause, savedRule, reason
+            if type(rule) == "table" and rule.rules ~= nil then
+                groups = groups + 1
+                if groups > MAX_RULES then return nil, nil, "Use at most 6 groups, or Advanced for more." end
+                clause, savedRule, reason = buildGroup(rule, depth + 1)
+                if clause ~= nil then clause = "(" .. clause .. ")" end
+            else
+                count = count + 1
+                if count > MAX_RULES then return nil, nil, "Use at most 6 conditions, or Advanced for more." end
+                clause, savedRule, reason = buildRule(rule, count)
+                if clause ~= nil and rule.negate == true then
+                    local field = fieldOf(rule.field)
+                    if field.kind == "boolean" then
+                        clause = field.key .. ":" .. (rule.operator == "true" and "false" or "true")
+                    else
+                        clause = "(" .. field.key .. ":[* TO *] AND NOT " .. clause .. ")"
+                    end
+                    savedRule.negate = true
+                end
+            end
+            if clause == nil then return nil, nil, reason end
+            clauses[position], saved.rules[position] = clause, savedRule
+        end
+        return table.concat(clauses, group.match == "all" and " AND " or " OR "), saved
     end
-    local rules = type(builder.rules) == "table" and builder.rules or {}
-    if #rules == 0 then return nil, nil, "Add at least one condition." end
-    if #rules > MAX_RULES then return nil, nil, "Use at most 6 conditions, or Advanced for more." end
-    local clauses, saved = {}, { match = builder.match, rules = {} }
-    for position, rule in ipairs(rules) do
-        local clause, savedRule, reason = buildRule(rule, position)
-        if clause == nil then return nil, nil, reason end
-        clauses[position], saved.rules[position] = clause, savedRule
+    if type(builder) == "table" and type(builder.rules) == "table" and #builder.rules == 0 then
+        return nil, nil, "Add at least one condition."
     end
-    return table.concat(clauses, builder.match == "all" and " AND " or " OR "), saved, nil
+    return buildGroup(builder, 0)
+end
+
+-- Flatten groups for drawing while preserving their owning arrays for edits.
+function QueryBuilder.Rows(builder)
+    local rows, conditions, groups = {}, {}, {}
+    local function visit(group, depth)
+        for position, rule in ipairs(group.rules or {}) do
+            local row = { rule = rule, siblings = group.rules, position = position, depth = depth }
+            rows[#rows + 1] = row
+            if type(rule) == "table" and rule.rules ~= nil then
+                groups[#groups + 1] = row
+                row.groupIndex = #groups
+                visit(rule, depth + 1)
+            else
+                conditions[#conditions + 1] = row
+                row.conditionIndex = #conditions
+            end
+        end
+    end
+    visit(builder, 0)
+    return rows, conditions, groups
 end
 
 -- Return saved conditions only when they still give this exact query
@@ -230,7 +279,9 @@ function QueryBuilder.Restore(builder, query)
     local trusted = QueryBuilder.Trusted(builder, query)
     if trusted ~= nil then return trusted end
     if type(builder) ~= "table" or type(builder.rules) ~= "table" then return nil end
-    for _, rule in ipairs(builder.rules) do
+    local _, conditions = QueryBuilder.Rows(builder)
+    for _, row in ipairs(conditions) do
+        local rule = row.rule
         if type(rule) == "table" and type(rule.field) == "string" and fieldOf(rule.field) == nil then
             return QueryBuilder.Copy(builder)
         end
@@ -241,7 +292,8 @@ end
 -- List core fields and any used by an existing search
 function QueryBuilder.VisualFields(builder)
     local existing, fields = {}, {}
-    for _, rule in ipairs(builder and builder.rules or {}) do existing[rule.field] = true end
+    local _, conditions = QueryBuilder.Rows(builder or {})
+    for _, row in ipairs(conditions) do existing[row.rule.field] = true end
     for _, field in ipairs(FIELDS) do
         if VISUAL_FIELDS[field.key] or existing[field.key] then fields[#fields + 1] = field end
     end
@@ -264,13 +316,23 @@ function QueryBuilder.Draft(builder)
     end
     draft.match = builder.match == "any" and "any" or "all"
     for index, rule in ipairs(builder.rules or {}) do
-        draft.rules[index] = {
-            field = rule.field,
-            operator = rule.operator,
-            value = rule.value ~= nil and tostring(rule.value) or "",
-            min = rule.min ~= nil and tostring(rule.min) or "",
-            max = rule.max ~= nil and tostring(rule.max) or "",
-        }
+        if rule.rules ~= nil then
+            draft.rules[index] = QueryBuilder.Draft(rule)
+        else
+            draft.rules[index] = {
+                field = rule.field,
+                operator = rule.operator,
+                value = rule.value ~= nil and tostring(rule.value) or "",
+                min = rule.min ~= nil and tostring(rule.min) or "",
+                max = rule.max ~= nil and tostring(rule.max) or "",
+                negate = rule.negate == true,
+            }
+            -- Older negative comparisons now use the same exclusion toggle.
+            if rule.operator == "not_equals" or rule.operator == "excludes" then
+                draft.rules[index].operator = rule.operator == "not_equals" and "equals" or "includes"
+                draft.rules[index].negate = not draft.rules[index].negate
+            end
+        end
     end
     if #draft.rules == 0 then draft.rules[1] = QueryBuilder.NewRule() end
     return draft
@@ -281,9 +343,11 @@ function QueryBuilder.Copy(builder)
     if type(builder) ~= "table" then return nil end
     local copy = { match = builder.match, rules = {} }
     for index, rule in ipairs(type(builder.rules) == "table" and builder.rules or {}) do
-        if type(rule) == "table" then
+        if type(rule) == "table" and rule.rules ~= nil then
+            copy.rules[index] = QueryBuilder.Copy(rule)
+        elseif type(rule) == "table" then
             copy.rules[index] = { field = rule.field, operator = rule.operator,
-                value = rule.value, min = rule.min, max = rule.max }
+                value = rule.value, min = rule.min, max = rule.max, negate = rule.negate }
         else
             copy.rules[index] = rule
         end

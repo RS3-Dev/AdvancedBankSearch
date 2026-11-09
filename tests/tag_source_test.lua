@@ -11,8 +11,8 @@ assert(manifest.version == "1.0.0" and manifest.dependencies == nil)
 assert(manifest.requiredDependencies.prettyui == 6398181)
 assert(manifest.requiredDependencies.bankcore == 6464293)
 assert(manifest.requiredDependencies.runeql == 6464301)
-assert(manifest.requiredDependencies.geprices == 6414886)
-assert(manifest.requiredDependencies.gepl == nil)
+assert(manifest.requiredDependencies.gepl == 6414886)
+assert(manifest.requiredDependencies.geprices == nil)
 assert(manifest.requiredDependencies.banktags == nil and manifest.optionalDependencies.banktags == nil)
 local registrations = 0
 h.host.exports.banktags = { RegisterExtension = function() registrations = registrations + 1 end }

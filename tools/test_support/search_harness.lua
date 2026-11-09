@@ -145,6 +145,7 @@ function Harness.FollowPrettyUIControls()
     local newView = prettyui.SimpleView.new
     prettyui.SimpleView.new = function(parent, options)
         local view = newView(parent, options)
+        view.root:SetPos(options.x or 0, options.y or 0, options.xAnchor or 0, options.yAnchor or 0)
         view.root:SetSize((options.width or 0) + (options.widthAnchor or 0) * parent.width,
             (options.height or 0) + (options.heightAnchor or 0) * parent.height)
         function view:SetContentHeight(height)
@@ -177,6 +178,80 @@ function Harness.FollowPrettyUIControls()
         end
         return view
     end
+    local newList = prettyui.List.new
+    prettyui.List.new = function(parent, options)
+        local list = newList(parent, options)
+        list.viewport:SetSize(options.width, options.height)
+        local setEntries, setSize = list.SetEntries, list.SetSize
+        function list:SetEntries(entries)
+            for _, row in ipairs(self.rows) do row.root:Destroy() end
+            setEntries(self, entries)
+            for index, row in ipairs(self.rows) do
+                row.root:SetPos(0, (index - 1) * self.entryHeight)
+                row.root:SetSize(self.root.width, self.entryHeight)
+                row.label.content = row.entry.label
+                row.label.rgba = row.entry.textColour
+            end
+        end
+        function list:SetSize(width, height)
+            setSize(self, width, height)
+            self.viewport:SetSize(width, height)
+        end
+        function list:SetScrollPosition(position)
+            local most = math.max(0, #self.rows * self.entryHeight - self.root.height)
+            self.scrollY = math.max(0, math.min(math.floor(position or 0), most))
+        end
+        function list:_OnScrollWheel(_, delta) self:SetScrollPosition(self.scrollY + delta * self.entryHeight); return true end
+        return list
+    end
+    local newSlot = prettyui.ItemSlot.new
+    prettyui.ItemSlot.new = function(...)
+        local slot = newSlot(...)
+        slot.root:SetSize(40, 40)
+        function slot:SetTooltip(value) self.tooltipText = value end
+        return slot
+    end
+    prettyui.ItemGrid = { new = function(parent, _, options)
+        local grid = { root = ui.Layer.new(parent), slots = {} }
+        grid.root:SetPos(options.x, options.y)
+        function grid:SetObjects(entries)
+            for _, slot in ipairs(self.slots) do slot:Destroy() end
+            self.slots = {}
+            for index, entry in ipairs(entries) do
+                self.slots[index] = prettyui.ItemSlot.new(self.root, entry.object, {
+                    x = ((index - 1) % options.columns) * (40 + options.slotGap),
+                    y = math.floor((index - 1) / options.columns) * (40 + options.slotGap),
+                })
+            end
+        end
+        function grid:GetSlot(index) return self.slots[index] end
+        function grid:Destroy() self.root:Destroy() end
+        return grid
+    end }
+    -- Same Tabs/GetPage/SetActive API used by Bank Tags' Import / Share window.
+    prettyui.Tabs = { new = function(parent, entries, options)
+        local tabs = { root = ui.Layer.new(parent), pages = {}, activeIndex = 1 }
+        tabs.root:SetPos(options.x, options.y)
+        tabs.root:SetSize(options.width, options.height)
+        for index in ipairs(entries) do
+            local page = { root = ui.Layer.new(tabs.root) }
+            page.root:SetPos(0, 42)
+            page.root:SetSize(options.width, options.height - 42)
+            page.content = ui.Layer.new(page.root)
+            page.content:SetSize(options.width, options.height - 42)
+            function page:SetContentHeight(height) self.contentHeight = height; self.content.height = height end
+            page.root.hidden = index ~= 1
+            tabs.pages[index] = page
+        end
+        function tabs:GetPage(index) return self.pages[index] end
+        function tabs:GetActiveIndex() return self.activeIndex end
+        function tabs:SetActive(index)
+            self.activeIndex = index
+            for key, page in ipairs(self.pages) do page.root.hidden = key ~= index end
+        end
+        function tabs:Destroy() self.root:Destroy() end
+        return tabs
+    end }
     local newButton = prettyui.SimpleButton.new
     prettyui.SimpleButton.new = function(...)
         local button = newButton(...)
@@ -312,6 +387,36 @@ function Harness.new(name, options)
     options = options or {}
     local coreRoot = Harness.CoreRoot()
     local bankHost = require("tools/test_support/fake_bank_host").install()
+    -- Current Core reads the bank interface before its components. Older
+    -- stand-in hosts expose only GetComponent; preserve that host's lookup.
+    if ui.Interfaces.GetInterface == nil then
+        local getComponent = ui.Interfaces.GetComponent
+        function ui.Interfaces:GetComponent(...)
+            local node = getComponent(self, ...)
+            if node ~= nil and node.position == nil then
+                node.position = { x = node.x or 0, y = node.y or 0, xParentPc = 0, yParentPc = 0,
+                    xSelfPc = 0, ySelfPc = 0 }
+                node.size = { width = node.width or 0, height = node.height or 0, widthParentPc = 0, heightParentPc = 0 }
+                local setPos, setSize = node.SetPos, node.SetSize
+                function node:SetPos(x, y, xp, yp, xs, ys)
+                    self.position = { x = x, y = y, xParentPc = xp or 0, yParentPc = yp or 0,
+                        xSelfPc = xs or 0, ySelfPc = ys or 0 }
+                    return setPos(self, x, y, xp, yp, xs, ys)
+                end
+                function node:SetSize(width, height, wp, hp)
+                    self.size = { width = width, height = height, widthParentPc = wp or 0, heightParentPc = hp or 0 }
+                    return setSize(self, width, height, wp, hp)
+                end
+            end
+            return node
+        end
+        function ui.Interfaces:GetInterface(interfaceID)
+            if bankHost.window == nil then return nil end
+            return { GetComponent = function(_, ...)
+                return ui.Interfaces:GetComponent(interfaceID, ...)
+            end }
+        end
+    end
     bankHost:InstallSidebarWidgets()
     bankHost:InstallWindowWidgets()
     bankHost:InstallPanelWidgets()
@@ -320,6 +425,12 @@ function Harness.new(name, options)
     ui.Margin = { new = function(...) return { ... } end }
     ui.AlignMode.BOTTOMRIGHT = 2
     id.Font.CINZEL_13PT_BOLD = 2
+    id.Sprite.HUD_COMBAT_BTN_BIN = id.Sprite.HUD_COMBAT_BTN_BIN or 3
+    id.Sprite.EXCLAMATION_MARK = id.Sprite.EXCLAMATION_MARK or 4
+    id.Sprite.BP3_MISSION_PLUS_ICON = id.Sprite.BP3_MISSION_PLUS_ICON or 5
+    id.Sprite.MTX_STORE_BTN_PLUS_ACTIVE = id.Sprite.MTX_STORE_BTN_PLUS_ACTIVE or 6
+    ui.Hook.ONMOUSEREPEAT = ui.Hook.ONMOUSEREPEAT or "mouserepeat"
+    MiniMenuEntryType = MiniMenuEntryType or { PLUGIN = "plugin" }
     -- Item and config names RuneQL ranks by, filled in by tests
     local objects = {}
     config.Obj.FromID = function(objectID) return objects[objectID] end
@@ -338,6 +449,11 @@ function Harness.new(name, options)
     Event.MiniMenuReady = {
         Subscribe = function(key, action) menuSubscriptions[key] = action end,
         Unsubscribe = function(key) menuSubscriptions[key] = nil end,
+    }
+    local menuOpenedSubscriptions = {}
+    Event.MiniMenuOpened = {
+        Subscribe = function(key, action) menuOpenedSubscriptions[key] = action end,
+        Unsubscribe = function(key) menuOpenedSubscriptions[key] = nil end,
     }
     -- Use PrettyUI's own buttons and tooltips so real layers are made
     Harness.KeepNamedHooks()
@@ -386,6 +502,7 @@ function Harness.new(name, options)
         databases = databases,
         logged = logged,
         menuSubscriptions = menuSubscriptions,
+        menuOpenedSubscriptions = menuOpenedSubscriptions,
         settingsSubscriptions = settingsSubscriptions,
         coreRoot = coreRoot,
         out = out,
@@ -425,7 +542,9 @@ end
 -- Name objects for RuneQL from { objectID, name, configName }
 function Harness:NameObjects(entries)
     for _, entry in ipairs(entries) do
-        self.objects[entry[1]] = { name = entry[2], configName = entry[3] or string.upper(string.gsub(entry[2], " ", "_")) }
+        local object = { id = entry[1], name = entry[2], configName = entry[3] or string.upper(string.gsub(entry[2], " ", "_")) }
+        self.objects[entry[1]] = object
+        config.Obj[object.configName] = object
     end
 end
 
@@ -483,7 +602,7 @@ function Harness:ContentMenu(coreFirst, item)
         if key == "entryCount" then return #values.entries end
     end })
     function menu:Add(label, action)
-        self.entries[#self.entries + 1] = { verbText = label, overrideText = label, action = action }
+        self.entries[#self.entries + 1] = { verbText = label, overrideText = label, action = action, actionEntryType = MiniMenuEntryType.PLUGIN }
     end
     function menu:Swap(a, b) self.entries[a], self.entries[b] = self.entries[b], self.entries[a] end
     local keys = {}
@@ -493,6 +612,9 @@ function Harness:ContentMenu(coreFirst, item)
         return a < b
     end)
     for _, key in ipairs(keys) do self.menuSubscriptions[key]({ miniMenu = menu }) end
+    menu.open = function()
+        for _, callback in pairs(self.menuOpenedSubscriptions) do callback() end
+    end
     return menu
 end
 
@@ -505,6 +627,7 @@ end
 
 -- Choose a menu entry whose label starts with the given text
 function Harness.Choose(menu, label)
+    if menu.open then menu.open() end
     for _, entry in ipairs(menu.entries) do
         if string.sub(entry.verbText, 1, #label) == label and entry.action ~= nil then return entry.action() end
     end
@@ -519,6 +642,28 @@ function Harness:PointAt(component, x, y)
         current = current.parent
     end
     self.bankHost.mouse = { x = left + x, y = top + y }
+    local app = self:App()
+    local tree = app and app.tab.controls and app.tab.controls.tree
+    if tree ~= nil then
+        local Geometry = self.search.env.require("resources/search/geometry")
+        local lx, ly = Geometry.absolutePosition(tree.list.viewport)
+        local px, py = left + x - lx, top + y - ly + tree.list.scrollY
+        for index, row in ipairs(tree.list.rows) do
+            row.root.isMouseOver = px >= 0 and px < tree.list.viewport.width
+                and py >= (index - 1) * 32 and py < (index - 1) * 32 + 30
+        end
+    end
+end
+
+-- Complete a row press/release as PrettyUI delivers it; a press alone can become a drag.
+function Harness:ClickRow(entryID)
+    local tree = self:App().tab.controls.tree
+    local row = tree:RowFor(entryID)
+    if row == nil then return false end
+    self:PointAt(tree.list.viewport, 20, row.root.y - tree.list.scrollY + 10)
+    if not tree.list:Click(entryID) then return false end
+    row.root.hooks[ui.Hook.ONRELEASE]()
+    return true
 end
 
 -- Find a component whose text matches, depth first

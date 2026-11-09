@@ -1,20 +1,14 @@
--- Add folder and saved-search entries to the Search column's row menus
--- The client places new entries unpredictably, so each is found and moved down
--- A chosen entry runs next tick, only if its column and row still exist
-
+-- Bank Tags-style row actions and folder submenus. Explicit menu choices are
+-- accepted once, then rechecked against the same row, mount and press count.
+local MenuEntries = require("resources/search/menu_entries")
+local Text = require("resources/core/text")
 local QueryMenus = {}
 QueryMenus.__index = QueryMenus
-
 local MENU_EVENT = "advancedbanksearch_menu"
 local ACTION_EVENT = "advancedbanksearch_menu_action"
-local NAME_COLOUR = "f2c66d"
 
--- Create the menus for an app; nothing is subscribed until Start
-function QueryMenus.new(app)
-    return setmetatable({ app = app, pending = {}, started = false }, QueryMenus)
-end
+function QueryMenus.new(app) return setmetatable({ app = app, pending = {}, started = false }, QueryMenus) end
 
--- Answer menus while the plugin is connected to Bank Core
 function QueryMenus:Start()
     if self.started then return end
     self.started = true
@@ -22,93 +16,25 @@ function QueryMenus:Start()
         local menu = event and event.miniMenu
         if menu ~= nil then pcall(function() self:HandleMenu(menu) end) end
     end)
+    Event.MiniMenuOpened.Subscribe(MENU_EVENT, function()
+        if self.rowMenu ~= nil then self.rowMenu.opened = true end
+    end)
 end
 
--- Stop answering menus and drop chosen entries that have not run
 function QueryMenus:Stop()
-    if self.started then Event.MiniMenuReady.Unsubscribe(MENU_EVENT) end
-    self.started = false
+    if self.started then
+        Event.MiniMenuReady.Unsubscribe(MENU_EVENT)
+        Event.MiniMenuOpened.Unsubscribe(MENU_EVENT)
+    end
+    self.started, self.rowMenu = false, nil
     Event.Logic.Unsubscribe(ACTION_EVENT)
     self.pending = {}
 end
 
--- Describe an entry well enough to tell it from its neighbours
-local function signature(entry)
-    return table.concat({ tostring(entry.actionType), tostring(entry.overrideText),
-        tostring(entry.fullText), tostring(entry.verbText), tostring(entry.subjectText) }, "\n")
-end
-
--- Strip markup and spaces and lowercase for comparison
-local function normalize(value)
-    return string.lower((tostring(value or ""):gsub("<[^>]->", "")):match("^%s*(.-)%s*$"))
-end
-
--- Make Cancel the default so a left click does nothing
-local function promoteCancel(menu)
-    for index, entry in ipairs(menu.entries) do
-        if entry.actionType == MiniMenuActionType.CANCEL then
-            for current = index, menu.entryCount - 1 do menu:Swap(current, current + 1) end
-            return
-        end
-    end
-end
-
--- Add one entry and return its index, or nil if not found
-local function add(menu, label, subject, action)
-    local text = label .. " <col=" .. NAME_COLOUR .. ">" .. subject .. "</col>"
-    local before = {}
-    for index, current in ipairs(menu.entries) do before[index] = signature(current) end
-    menu:Add(text, action)
-    local entries, count = menu.entries, menu.entryCount
-    if count ~= #before + 1 then return nil end
-    local added = count
-    for index = 1, count do
-        if signature(entries[index]) ~= before[index] then
-            added = index
-            break
-        end
-    end
-    local wanted, found = normalize(text), entries[added]
-    if normalize(found.overrideText) ~= wanted and normalize(found.fullText) ~= wanted
-        and normalize(found.verbText) ~= wanted then
-        return nil
-    end
-    return added
-end
-
--- Move an entry from one index to another, shifting the ones between
-local function move(menu, from, to)
-    local step = from < to and 1 or -1
-    for current = from, to - step, step do menu:Swap(current, current + step) end
-end
-
--- Add entries just above a bottom Cancel, keeping the default
--- If any entry is lost or the default moves, Cancel becomes default
-local function addLow(menu, entries)
-    local top = menu.entries[menu.entryCount]
-    local topSignature = top ~= nil and signature(top) or nil
-    local cancelTop = top ~= nil and top.actionType == MiniMenuActionType.CANCEL
-    local first = menu.entries[1]
-    local base = (not cancelTop and first ~= nil and first.actionType == MiniMenuActionType.CANCEL) and 1 or 0
-    for index, entry in ipairs(entries) do
-        local added = add(menu, entry[1], entry[2], entry[3])
-        if added == nil then
-            promoteCancel(menu)
-            return
-        end
-        move(menu, added, base + index)
-    end
-    local now = menu.entries[menu.entryCount]
-    if now == nil or signature(now) ~= topSignature then promoteCancel(menu) end
-end
-
--- Run an action next tick if current() still returns true
 function QueryMenus:Defer(current, action)
     return function()
         if not current() then return end
-        self.pending[#self.pending + 1] = function()
-            if current() then action() end
-        end
+        self.pending[#self.pending + 1] = function() if current() then action() end end
         Event.Logic.Subscribe(ACTION_EVENT, function()
             Event.Logic.Unsubscribe(ACTION_EVENT)
             local pending = self.pending
@@ -118,75 +44,88 @@ function QueryMenus:Defer(current, action)
     end
 end
 
--- Get the pointer position in the scaled interface
-local function pointer()
-    if Mouse == nil or Mouse.GetPosition == nil then return nil, nil end
-    local position = Mouse.GetPosition()
-    if position == nil then return nil, nil end
-    local interfaceScale = game ~= nil and game.options ~= nil and game.options.InterfaceScale or nil
-    local percent = interfaceScale ~= nil and tonumber(interfaceScale.setting) or 100
-    if percent <= 0 then percent = 100 end
-    return position.x * 100 / percent, position.y * 100 / percent
-end
-
--- Find the Search column row beneath the pointer, with the mounted context it was found in
 function QueryMenus:RowAtPointer()
-    local tab = self.app.tab
-    local ctx = tab.ctx
+    local tab, ctx = self.app.tab, self.app.tab.ctx
     if ctx == nil or not tab:IsMounted() then return nil end
-    local pointerX, pointerY = pointer()
-    if pointerX == nil then return nil end
-    local left, top, current = 0, 0, ctx.parent
-    for _ = 1, 32 do
-        if current == nil then break end
-        left, top = left + (tonumber(current.x) or 0), top + (tonumber(current.y) or 0)
-        current = current.parent
-    end
-    local x, y = math.floor(pointerX - left), math.floor(pointerY - top)
-    if x < 0 or y < 0 or x >= ctx.width or y >= ctx.height then return nil end
-    return tab:EntryAt(x, y), ctx
+    return tab.controls.tree:HoveredEntry(), ctx
 end
 
--- Show a name as a menu subject, without markup
-local function plain(name)
-    return (string.gsub(tostring(name), "[<>]", ""))
-end
-
--- Offer the folder or saved-search actions for the clicked row
 function QueryMenus:HandleMenu(menu)
-    local app = self.app
+    self.rowMenu = nil
+    local app, tab = self.app, self.app.tab
     local ext = app.ext
     if ext == nil or ext:GetMenuItem(menu) ~= nil then return end
     local entry, ctx = self:RowAtPointer()
     if entry == nil then return end
-    local store, tab = app.queries, app.tab
-    local exists = entry.kind == "folder" and function() return store:GetFolder(entry.id) ~= nil end
-        or function() return store:Get(entry.id) ~= nil end
+    local tree, store = tab.controls.tree, app.queries
+    local clicks = tree.clicks
+    local function exists()
+        return entry.kind == "folder" and store:GetFolder(entry.id) ~= nil
+            or entry.kind == "query" and store:Get(entry.id) ~= nil
+    end
     local current = function()
-        return app.ext == ext and tab.ctx == ctx and tab:IsMounted() and exists()
+        return app.ext == ext and tab.ctx == ctx and tab.controls ~= nil
+            and tab.controls.tree == tree and tree.clicks == clicks and exists()
+    end
+    local rowMenu = { opened = false, used = false }
+    local function chosen(action, check)
+        local deferred = self:Defer(check or current, action)
+        return function()
+            if not rowMenu.opened or rowMenu.used then return end
+            rowMenu.used = true
+            deferred()
+        end
     end
     local entries = {}
-    -- Offer one action
     local function offer(label, name, action)
-        entries[#entries + 1] = { label, plain(name), self:Defer(current, action) }
+        entries[#entries + 1] = { label = label, subject = Text.plain(name), action = chosen(action) }
     end
     if entry.kind == "folder" then
         local folder = store:GetFolder(entry.id)
-        if folder == nil then return end
         offer(folder.collapsed and "Expand" or "Collapse", folder.name, function() app:ToggleFolder(entry.id) end)
         offer("Rename folder", folder.name, function() app:OpenRenameFolder(entry.id) end)
         offer("Ungroup folder", folder.name, function() app:UngroupFolder(entry.id) end)
     else
         local record = store:Get(entry.id)
-        if record == nil then return end
+        offer("Select", record.name, function() app:ChooseQuery(entry.id) end)
         offer("Edit", record.name, function() app:EditQuery(entry.id) end)
-        offer("Move to folder...", record.name, function() app:OpenFolderChooser(entry.id) end)
+        offer("Rename", record.name, function() app:OpenRenameQuery(entry.id) end)
+        if prettyui.MiniMenu == nil then
+            offer("Move to folder...", record.name, function() app:OpenFolderChooser(entry.id) end)
+        end
         local folder = store:GetFolder(store:FolderOf(entry.id))
         if folder ~= nil then
             offer("Remove from folder", folder.name, function() app:MoveQueryToFolder(entry.id, nil) end)
         end
+        offer("Remove", record.name, function()
+            app:OpenDeleteConfirm(entry.id)
+        end)
     end
-    addLow(menu, entries)
+    if not MenuEntries.AddTop(menu, entries) then return end
+    self.rowMenu = rowMenu
+    if entry.kind == "query" then self:AddFolderSubmenu(menu, entry.id, 3, chosen, current) end
 end
 
+function QueryMenus:AddFolderSubmenu(menu, queryID, position, chosen, isCurrent)
+    local MiniMenu = prettyui.MiniMenu
+    if MiniMenu == nil then return end
+    local app, children = self.app, {}
+    local currentFolder = app.queries:FolderOf(queryID)
+    for _, folder in ipairs(app.queries:Folders()) do
+        local folderID = folder.id
+        if folderID ~= currentFolder then
+            children[#children + 1] = { label = Text.plain(folder.name),
+                action = chosen(function() app:MoveQueryToFolder(queryID, folderID) end,
+                    function() return isCurrent() and app.queries:GetFolder(folderID) ~= nil end) }
+        end
+    end
+    children[#children + 1] = { label = "Create new folder",
+        action = chosen(function() app:OpenCreateFolderPrompt(queryID) end) }
+    children[#children + 1] = { label = "Cancel", action = function() end }
+    local label = currentFolder ~= nil and "Move to folder" or "Add to folder"
+    local record = app.queries:Get(queryID)
+    local text = MenuEntries.Text(label, Text.plain(record.name))
+    MiniMenu.AddSubmenu(menu, text, children, { title = label, position = position })
+    MenuEntries.PlaceSubmenu(menu, text .. " <col=ffffff><gt></col>", position)
+end
 return QueryMenus

@@ -42,7 +42,10 @@ end
 -- Persist a preference before applying its behavior
 function Settings:Set(key, value)
     if not valid(key, value) then return false, "Invalid preference." end
-    if self.values[key] == value then return true end
+    if self.values[key] == value then
+        if key == "editorMode" and self.onChange ~= nil then self.onChange(key) end
+        return true
+    end
     local nextValues = {}
     for name, current in pairs(self.values) do nextValues[name] = current end
     nextValues[key] = value
@@ -90,7 +93,9 @@ function Settings:Mount(parent)
             end,
         })
     end
-    add("editorMode", "Default editor for new searches")
+    add("editorMode", "Query builder")
+    view:AddText({ text = "Applies to open and saved queries. Queries without visual conditions open in Advanced.",
+        height = 42, maxLines = 3, font = id.Font.MUSEO_SANS_11PT_REGULAR, colour = 0xAFA58FFF })
     add("includePlaceholders", "Include placeholders in search results")
     add("searchDelayTicks", "Search delay")
     self.status = view:AddText({ text = "", colour = 0xE57373FF })

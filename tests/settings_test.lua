@@ -52,7 +52,7 @@ app:NewQuery()
 assert(app.editor.mode == "advanced")
 app:CloseEditor()
 
--- The default mode applies only to new searches
+-- The preference applies to new queries and saved visual queries.
 assert(app:SaveQuery(nil, "Typed", "iron"))
 app:EditQuery("1")
 assert(app.editor.mode == "advanced")
@@ -60,7 +60,24 @@ app:CloseEditor()
 local builder = { match = "all", rules = { { field = "qty", operator = "atleast", value = 1 } } }
 assert(app:SaveQuery(nil, "Visual", "qty:[1 TO *]", builder))
 app:EditQuery("2")
+assert(app.editor.mode == "advanced" and app.editor.queryField:GetText() == "qty:[1 TO *]")
+assert(app.settings:Set("editorMode", "visual"))
+assert(app.editor.mode == "visual" and app.editor.visualButton == nil and app.editor.advancedButton == nil)
+assert(app.settings:Set("editorMode", "advanced"))
+assert(app.editor.mode == "advanced")
+-- The actual Plugin Hub control changes the live builder; a rejected write does not.
+app.settings:Mount(parent)
+assert(Harness.Find(parent, "Query builder") ~= nil)
+app.settings.controls.editorMode.root:Click("Visual")
 assert(app.editor.mode == "visual")
+assert(app.editor.body.root.y == 0)
+app.settings.controls.editorMode.root:Click("Advanced")
+assert(app.editor.mode == "advanced")
+local currentDB = h.search.env.PersistentDB
+h.search.env.PersistentDB = { GetString = currentDB.GetString, SetString = function() return false end }
+app.settings.controls.editorMode.root:Click("Visual")
+assert(app.editor.mode == "advanced" and app.settings.controls.editorMode:GetSelectedLabel() == "Advanced")
+h.search.env.PersistentDB = currentDB
 app:CloseEditor()
 
 -- Quick-search settings apply immediately, saved searches still exclude placeholders

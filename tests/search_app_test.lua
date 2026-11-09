@@ -50,7 +50,7 @@ end
 
 -- Press a PrettyUI button
 local function press(button)
-    button.root.hooks[ui.Hook.ONCLICK]()
+    local action = button.root.hooks[ui.Hook.ONBUTTONPRESSED] or button.root.hooks[ui.Hook.ONCLICK]; action()
     h:Tick(2)
 end
 
@@ -98,13 +98,13 @@ assert(layout.shownPage.title == "Search")
 -- Every iron stack, placeholder included, and never the lobster
 local first = shown()
 assert(string.find(first, "103=0", 1, true) and string.find(first, "101=3", 1, true) and not string.find(first, "105"), first)
-assert(controls.status.content == "5 matches.", controls.status.content)
+assert(app.status == "5 matches.", app.status)
 -- New text opens again, starting at the top; 101 is listed once per matching stack
 local opening = key()
 type("iron bar")
 assert(key() ~= opening and string.find(shown(), "^101=5 101=3 "), shown())
 
--- A bank change reranks in place; Core shows 101's stocked stack before its placeholder
+-- A bank change keeps result slots; Core updates stocked stacks and placeholders itself.
 opening = key()
 takeUpdates()
 host:Rebuild(function(specs)
@@ -113,16 +113,16 @@ host:Rebuild(function(specs)
 end)
 layout:HandleInventoryUpdate()
 h:Tick(4)
-assert(takeUpdates() == 1 and key() == opening)
+assert(takeUpdates() == 0 and key() == opening)
 assert(string.find(shown(), "^101=3 101=0 "), shown())
 
 -- Text RuneQL cannot read shows why
 type("name:(iron")
 assert(shown() == "[RuneQL could not read this search]", shown())
-assert(string.find(controls.status.content, "^RuneQL could not read this search: "))
+assert(string.find(app.status, "^RuneQL could not read this search: "))
 -- Nothing found says so
 type("dragon")
-assert(shown() == "[No items match]" and controls.status.content == "No items match.")
+assert(shown() == "[No items match]" and app.status == "No items match.")
 -- Clearing the text returns to the bank's own view
 type("")
 assert(key() == nil and app:ShownPage() == nil)
@@ -173,7 +173,7 @@ host:Rebuild(function(specs)
 end)
 layout:HandleInventoryUpdate()
 h:Tick(4)
-h.host:Notify("geprices", false, false)
+h.host:Notify("gepl", false, false)
 h:Tick(2)
 local during = takeCompiled()
 assert(string.find(during, "iron bar", 1, true) and not string.find(during, "lobster", 1, true), during)
@@ -207,7 +207,7 @@ local listHeight, footerTop = controls.list.root.height, controls.new.root.y
 layout:ResizeSidebar(layout.sidebarHeight + 40)
 assert(app.tab.controls == controls and controls.field == field and controls.field:GetText() == "iron ore")
 assert(waiting() and takeCompiled() == "" and h:TabParent() == app.tab.ctx.parent)
-assert(controls.new.root.y == footerTop + 40 and controls.delete.root.y == footerTop + 40)
+assert(controls.new.root.y == footerTop + 40 and controls.share.root.y == footerTop + 40)
 assert(controls.list.root.height == listHeight + 40, tostring(controls.list.root.height))
 h:Tick(5)
 assert(takeCompiled() == "iron ore" and app:ShownPage() == "search" and controls.field:GetText() == "iron ore")
@@ -215,7 +215,7 @@ type("")
 
 -- Typing updates disabled states only when they change
 local disabledSets = 0
-for _, name in ipairs({ "field", "edit", "delete" }) do
+for _, name in ipairs({ "field", "edit" }) do
     local setDisabled = controls[name].SetDisabled
     controls[name].SetDisabled = function(...)
         disabledSets = disabledSets + 1
@@ -232,8 +232,8 @@ h:Tick(4)
 -- Saved queries -------------------------------------------------------------------------
 
 assert(rows() == "" and not controls.empty.hidden)
-assert(controls.edit.disabled and controls.delete.disabled)
--- The editor opens shown
+assert(controls.edit.hidden and controls.delete == nil)
+-- The editor opens in the bank without creating a separate window
 local newWindow, shownWindows = prettyui.Window.new, 0
 prettyui.Window.new = function(...)
     local window = newWindow(...)
@@ -246,10 +246,10 @@ prettyui.Window.new = function(...)
 end
 press(controls.new)
 local editor = app.editor
-assert(editor ~= nil and editor.queryID == nil and shownWindows == 1)
+assert(editor ~= nil and editor.queryID == nil and shownWindows == 0 and app.editorExt:IsOpen())
 -- New queries start in Visual; these are typed in Advanced
 assert(editor.mode == "visual")
-press(editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 editor.nameField:SetText("Iron")
 editor.queryField:SetText("iron")
 -- Saving compiles at once, not after a pause
@@ -260,22 +260,39 @@ h:Tick(2)
 assert(app.editor == nil and rows() == "Iron" and app.selectedQuery == "1")
 assert(h.databases.advancedbanksearch["advancedbanksearch:queries:v1:manifest"] ~= nil)
 
--- Choosing it shows its page without placeholders and adds its count
+-- Choosing it shows its page without placeholders and keeps its name alone
 -- Text still waiting to search is dropped, so it cannot take the page
 enter("lobster")
-assert(controls.list:Click("1"))
+assert(h:ClickRow("1"))
 h:Tick(20)
 assert(app:ShownPage() == "query" and layout.shownPage.title == "Iron")
 assert(not waiting() and app.text == "" and controls.field:GetText() == "lobster")
 assert(shown() == "101=5 102=5 104=5 101=3", shown())
-assert(rows() == "Iron (4)", rows())
+assert(rows() == "Iron", rows())
+-- Withdrawing all of an item keeps its slot, even with no native placeholder.
+opening = key()
+takeUpdates()
+host:SetItems({ { 101, 2 }, { 103, 0 }, { 104, 0 }, { 105, 9 }, { 101, 3 } })
+layout:HandleInventoryUpdate()
+h:Tick(4)
+assert(key() == opening and takeUpdates() == 0)
+assert(shown() == "101=2 102=0 104=0 101=3", shown())
+assert(h:ClickRow("1"))
+assert(h:ClickRow("1"))
+h:Tick(4)
+assert(shown() == "101=2 101=3", shown())
+-- Depositing items also leaves membership fixed until the next opening.
+host:SetItems({ { 101, 5 }, { 102, 5 }, { 103, 0 }, { 104, 5 }, { 105, 9 }, { 101, 3 } })
+layout:HandleInventoryUpdate()
+h:Tick(4)
+assert(shown() == "101=5 101=3", shown())
 -- Choosing it again returns to the bank's own view
-assert(controls.list:Click("1"))
+assert(h:ClickRow("1"))
 h:Tick(2)
 assert(key() == nil)
 
 -- Editing renames the shown page
-assert(controls.list:Click("1"))
+assert(h:ClickRow("1"))
 h:Tick(2)
 press(controls.edit)
 app.editor.nameField:SetText("Bars")
@@ -283,21 +300,21 @@ app.editor.queryField:SetText('name:"iron bar"')
 press(app.editor.saveButton)
 h:Tick(2)
 assert(layout.shownPage.title == "Bars" and app:ShownPage() == "query")
-assert(shown() == "101=5 101=3" and rows() == "Bars (2)", shown())
+assert(shown() == "101=5 101=3" and rows() == "Bars", shown())
 
 -- A refused save shows in the editor and changes nothing
 local database = h.search.env.PersistentDB
 h.search.env.PersistentDB = { GetString = database.GetString, SetString = function() return false end }
 press(controls.new)
-press(app.editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 app.editor.nameField:SetText("Lobster")
 app.editor.queryField:SetText("lobster")
 press(app.editor.saveButton)
 assert(app.editor ~= nil and app.editor.status.content == "PersistentDB could not save RuneQL chunk 1.")
-assert(app.queries:FindName("Lobster") == nil and rows() == "Bars (2)")
+assert(app.queries:FindName("Lobster") == nil and rows() == "Bars")
 h.search.env.PersistentDB = database
 press(app.editor.saveButton)
-assert(app.editor == nil and rows() == "Bars (2) | Lobster")
+assert(app.editor == nil and rows() == "Bars | Lobster")
 
 -- Saving another query selects it but keeps the shown page
 assert(app:ShownPage() == "query" and app.pageQuery == "1" and app.selectedQuery == "2")
@@ -314,39 +331,39 @@ local before = stored()
 local unreadable, unreadableReason = app:RuneQL().Compile("iron AND (")
 assert(unreadable == nil and unreadableReason ~= nil)
 press(controls.new)
-press(app.editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 app.editor.nameField:SetText("Broken")
 app.editor.queryField:SetText("iron AND (")
 press(app.editor.saveButton)
 assert(app.editor ~= nil and app.editor.status.content == tostring(unreadableReason), app.editor.status.content)
-assert(stored() == before and rows() == "Bars (2) | Lobster" and app.selectedQuery == "2" and app:ShownPage() == "query")
-app:CloseEditor()
+assert(stored() == before and rows() == "Bars | Lobster" and app.selectedQuery == "2" and app:ShownPage() == nil and app.editorExt:IsOpen())
+app.editor:Close()
 -- Editing an unshown query drops its count only when saved
-assert(controls.list:Click("1"))
+assert(h:ClickRow("1"))
 h:Tick(2)
-assert(key() == nil and app.selectedQuery == "1" and rows() == "Bars (2) | Lobster")
+assert(key() == nil and app.selectedQuery == "1" and rows() == "Bars | Lobster")
 press(controls.edit)
 app.editor.queryField:SetText("iron AND (")
 press(app.editor.saveButton)
-assert(app.editor ~= nil and stored() == before and rows() == "Bars (2) | Lobster")
+assert(app.editor ~= nil and stored() == before and rows() == "Bars | Lobster")
 app.editor.queryField:SetText("iron")
 press(app.editor.saveButton)
 assert(app.editor == nil and app.queries:Get("1").query == "iron" and rows() == "Bars | Lobster", rows())
--- Showing it counts it afresh
-assert(controls.list:Click("1"))
+-- Showing it refreshes results without adding a count to the name
+assert(h:ClickRow("1"))
 h:Tick(2)
-assert(app:ShownPage() == "query" and rows() == "Bars (4) | Lobster", rows())
+assert(app:ShownPage() == "query" and rows() == "Bars | Lobster", rows())
 
 -- Delete asks once, then deletes and leaves the page
-assert(controls.list:Click("1"))
+assert(h:ClickRow("1"))
 h:Tick(2)
 assert(key() == nil and app.selectedQuery == "1")
-assert(controls.list:Click("1"))
+assert(h:ClickRow("1"))
 h:Tick(2)
 assert(app:ShownPage() == "query")
-press(controls.delete)
-assert(app.queries:Get("1") ~= nil and controls.status.content == 'Press Delete again to delete "Bars".')
-press(controls.delete)
+app:DeleteQuery()
+assert(app.queries:Get("1") ~= nil and app.status == 'Press Delete again to delete "Bars".')
+app:DeleteQuery()
 assert(app.queries:Get("1") == nil and key() == nil and app.pageID == nil and rows() == "Lobster")
 
 -- Price queries -------------------------------------------------------------------------
@@ -364,12 +381,12 @@ local prices = {
         error("Price not found for itemId: " .. tostring(objectID))
     end,
 }
-h.host.exports.geprices = prices
-h.host:Notify("geprices", true, true)
+h.host.exports.gepl = prices
+h.host:Notify("gepl", true, true)
 assert(app:Prices() == prices)
 type("iron AND NOT price:[1 TO 100] ")
 assert(shown() == "[Waiting for GE prices...]" and app.priceWait ~= nil, shown())
-assert(controls.status.content == "Waiting for GE prices...")
+assert(app.status == "Waiting for GE prices...")
 -- No check runs before the 30th tick
 local wait = app.priceWait
 while wait.ticks < 28 do h:Tick() end
@@ -406,7 +423,7 @@ for _ = 1, 60 do h:Tick() end
 assert(layout.shownPage == nil and app.priceWait == nil)
 -- Outside All Items, a new search says what to do in the status line
 type("lobster")
-assert(layout.shownPage == nil and controls.status.content == 'Select "All Items" to view these search results.')
+assert(layout.shownPage == nil and app.status == 'Select "All Items" to view these search results.')
 layout:SetNativeViewAll(true)
 h:Tick(2)
 
@@ -415,13 +432,13 @@ ready = false
 type("price:[1 TO *]")
 for _ = 1, 1800 do h:Tick() end
 assert(app.priceWait == nil and shown() == "[GE prices did not load]", shown())
-assert(controls.status.content == "GE prices did not load; check GE Prices' HTTP access.")
+assert(app.status == "GE prices did not load; check GE Prices' HTTP access.")
 
 -- GE Prices unloading ends a wait and its global is ignored
 type("price:[2 TO *]")
 assert(app.priceWait ~= nil)
-h.host:Notify("geprices", false, false)
-assert(app.priceWait == nil and app:Prices() == nil and rawget(h.search.env, "geprices") == prices)
+h.host:Notify("gepl", false, false)
+assert(app.priceWait == nil and app:Prices() == nil and rawget(h.search.env, "gepl") == prices)
 h:Tick(2)
 assert(shown() == "[This search needs GE Prices]", shown())
 
@@ -434,13 +451,13 @@ h.host:Notify("runeql", false, false)
 assert(not waiting())
 h:Tick(20)
 assert(key() == nil and app:RuneQL() == nil and controls.field.disabled)
-assert(rows() == "Lobster" and controls.status.content == "Searching needs RuneQL. Enable RuneQL to search your bank.")
+assert(rows() == "Lobster" and app.status == "Searching needs RuneQL. Enable RuneQL to search your bank.")
 press(controls.new)
 assert(app.editor.saveButton.disabled and app.editor.status.content == "Searching needs RuneQL. Enable RuneQL to search your bank.")
 press(app.editor.saveButton)
 assert(app.editor ~= nil and app.queries:FindName("") == nil and #app.queries:All() == 1)
-app:CloseEditor()
-assert(controls.list:Click("2"))
+app.editor:Close()
+assert(h:ClickRow("2"))
 h:Tick(2)
 assert(key() == nil)
 -- RuneQL loads again and searching works

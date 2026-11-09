@@ -52,12 +52,8 @@ end
 
 -- Constructor callbacks and failures must not leave an orphan window
 local baselineNodes = liveNodes(h.bankHost.window.host)
-local windowFactory, comboFactory, fieldFactory = prettyui.Window.new, prettyui.ComboBox.new, prettyui.TextField.new
-local partialWindow, staleCallbacks, fieldCount = nil, {}, 0
-prettyui.Window.new = function(parent, options)
-    partialWindow = windowFactory(parent, options)
-    return partialWindow
-end
+local comboFactory, fieldFactory = prettyui.ComboBox.new, prettyui.TextField.new
+local staleCallbacks, fieldCount = {}, 0
 prettyui.ComboBox.new = function(parent, options)
     local box = comboFactory(parent, options)
     if options.onChange then options.onChange(box, options.selectedID) end
@@ -73,17 +69,17 @@ prettyui.TextField.new = function(parent, options)
     if fieldCount == 4 then error("injected native construction failure") end
     return field
 end
-local opened, failure = pcall(function() app:NewQuery() end)
-assert(not opened and tostring(failure):find("injected native construction failure", 1, true))
-assert(app.editor == nil and partialWindow.root.destroyed)
+local opened, failure = app:NewQuery()
+assert(not opened and failure == "failed", tostring(failure))
+assert(app.editor == nil and app.editorExt == nil)
 for _, callback in ipairs(staleCallbacks) do callback() end
 assert(liveNodes(h.bankHost.window.host) == baselineNodes, "failed editor leaked components")
-prettyui.Window.new, prettyui.ComboBox.new, prettyui.TextField.new = windowFactory, comboFactory, fieldFactory
+prettyui.ComboBox.new, prettyui.TextField.new = comboFactory, fieldFactory
 
 -- Press a PrettyUI button
 local function press(button)
     assert(not button.disabled, "pressed a disabled button")
-    button.root.hooks[ui.Hook.ONCLICK]()
+    local action = button.root.hooks[ui.Hook.ONBUTTONPRESSED] or button.root.hooks[ui.Hook.ONCLICK]; action()
     h:Tick(1)
 end
 
@@ -138,7 +134,7 @@ for _ = 1, 20 do
     enter(closing.slots[1].valueField, "bird")
     assert(liveNodes(h.bankHost.window.host) < 4096, "editor exceeds the component budget")
     local staleEdit = closing.slots[1].valueField.options.onChange
-    closing.window:Close()
+    closing:Close()
     assert(app.editor == nil and closing.destroyed)
     staleEdit(nil, "change", "after close")
     assert(liveNodes(h.bankHost.window.host) == baselineNodes, "closed editor leaked components")
@@ -158,20 +154,20 @@ end
 
 press(controls.new)
 local editor = app.editor
-assert(editor.mode == "visual" and editor.visualButton.active and not editor.advancedButton.active)
+assert(editor.mode == "visual" and editor.visualButton == nil and editor.advancedButton == nil)
 assert(shownRows() == 1 and row(1).removeButton.disabled and not editor.addButton.disabled)
 assert(not visible(editor.queryField) and not visible(editor.characterCount) and visible(editor.preview))
 assert(editor.cancelButton.root.parent == editor.footer.root and editor.saveButton.root.parent == editor.footer.root)
-assert(editor.footer.root.parent == editor.window.content and editor.footer.root.y == -editor.footer.root.height)
-assert(editor.body.root.parent == editor.window.content and editor.content ~= editor.window.content)
+assert(editor.footer.root.parent == editor.root and editor.footer.root.y == -editor.footer.root.height)
+assert(editor.body.root.parent == editor.root and editor.content ~= editor.root)
 local footerY, cancelY, saveY = editor.footer.root.y, editor.cancelButton.root.y, editor.saveButton.root.y
 assert(shown(row(1).fieldBox) == "Item name" and shown(row(1).operatorBox) == "has phrase")
 -- Native labels and IDs share alphabetical order and show the draft's choice
 local expectedFields = { "Item name", "Quantity", "GE price", "Category", "Skills", "Types",
-    "Combat style", "Slot", "Tier", "Tradeable", "Augmented" }
+    "Combat style", "Slot", "Tier", "Tradeable", "Augmented", "Dose" }
 table.sort(expectedFields)
 assert(labels(row(1).fieldBox) == table.concat(expectedFields, ","))
-assert(#editor.fields == 11)
+assert(#editor.fields == 12)
 assert(shown(row(1).fieldBox) == "Item name" and shown(row(1).operatorBox) == "has phrase")
 assert(labels(row(1).operatorBox) == "has all words,has phrase")
 assert(labels(editor.matchBox) == "all conditions (AND),any condition (OR)")
@@ -296,15 +292,15 @@ assert(shown(row(2).fieldBox) == "Quantity" and shown(row(2).operatorBox) == "is
 assert(labels(row(2).operatorBox) == "is,is at least,is at most,is between")
 assert(editor.preview.content == record.query)
 -- Advanced shows the text the conditions give, and Visual comes back without asking
-press(editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 assert(editor.mode == "advanced" and editor.queryField:GetText() == record.query and visible(editor.queryField))
-assert(not visible(editor.preview) and not visible(row(1).fieldBox) and editor.advancedButton.active)
+assert(not visible(editor.preview) and not visible(row(1).fieldBox))
 assert(editor.characterCount.content == #record.query .. " / 9999")
-press(editor.visualButton)
+assert(app.settings:Set("editorMode", "visual"))
 assert(editor.mode == "visual" and editor.status.hidden and shownRows() == 2)
 assert(shown(row(1).fieldBox) == "Item name" and shown(row(2).operatorBox) == "is at least")
 -- Saving unchanged text from Advanced keeps the conditions
-press(editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 press(editor.saveButton)
 assert(app.queries:Get("1").builder ~= nil)
 
@@ -312,11 +308,13 @@ assert(app.queries:Get("1").builder ~= nil)
 
 press(controls.edit)
 editor = app.editor
-press(editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 enter(editor.queryField, "(" .. record.query .. ") OR name:lobster")
--- Visual asks before replacing typed text
-press(editor.visualButton)
-assert(editor.mode == "advanced" and editor.status.content == "Visual conditions replace this RuneQL. Press Visual again to use them.")
+-- Settings switch the open builder without losing detached Advanced text.
+assert(app.settings:Set("editorMode", "visual"))
+assert(editor.mode == "visual" and editor.status.content == "Saving visual conditions will replace the advanced query.")
+assert(app.settings:Set("editorMode", "advanced"))
+assert(editor.queryField:GetText() == "(" .. record.query .. ") OR name:lobster")
 press(editor.saveButton)
 record = app.queries:Get("1")
 assert(record.query == '(name:"iron" AND qty:[10 TO *]) OR name:lobster' and record.builder == nil)
@@ -325,7 +323,7 @@ assert(matched("1") == "102,104", matched("1"))
 press(controls.edit)
 editor = app.editor
 assert(editor.mode == "advanced" and editor.queryField:GetText() == record.query)
-editor.window:Close()
+editor:Close()
 assert(app.editor == nil)
 
 -- A typed query ----------------------------------------------------------------------
@@ -336,18 +334,12 @@ assert(app:SaveQuery(nil, "Runes", typed))
 app:EditQuery("2")
 editor = app.editor
 assert(editor.queryID == "2" and editor.mode == "advanced" and editor.queryField:GetText() == typed)
--- Leaving for Visual needs a second press, then starts a blank condition
-press(editor.visualButton)
-assert(editor.mode == "advanced" and not editor.status.hidden)
--- Typing again asks again
-enter(editor.queryField, typed .. " ")
-assert(editor.status.hidden and not editor.confirmVisual)
-enter(editor.queryField, typed)
-press(editor.visualButton)
-press(editor.visualButton)
-assert(editor.mode == "visual" and shownRows() == 1 and editor.draft.rules[1].value == "")
+-- Visual starts blank for custom RuneQL; switching back keeps that text intact.
+assert(app.settings:Set("editorMode", "visual"))
+assert(editor.mode == "visual" and not editor.status.hidden)
+assert(shownRows() == 1 and editor.draft.rules[1].value == "")
 -- Incomplete conditions leave the typed text alone
-press(editor.advancedButton)
+assert(app.settings:Set("editorMode", "advanced"))
 assert(editor.mode == "advanced" and editor.queryField:GetText() == typed)
 assert(editor.status.content == "The conditions are incomplete, so the RuneQL text was not changed.")
 press(editor.saveButton)
@@ -355,8 +347,7 @@ assert(app.queries:Get("2").query == typed and app.queries:Get("2").builder == n
 -- Saving from Visual replaces the text only when the player chose it
 app:EditQuery("2")
 editor = app.editor
-press(editor.visualButton)
-press(editor.visualButton)
+assert(app.settings:Set("editorMode", "visual"))
 enter(row(1).valueField, "rune bar")
 press(editor.saveButton)
 assert(app.queries:Get("2").query == 'name:"rune bar"' and app.queries:Get("2").builder ~= nil)
@@ -377,7 +368,7 @@ assert(editor.status.hidden)
 
 -- Catalog conditions save and reopen with their controls -------------------------------
 
-editor.window:Close()
+editor:Close()
 press(controls.new)
 editor = app.editor
 enter(editor.nameField, "Catalog equipment")
@@ -457,18 +448,18 @@ assert(editor.preview.content:find('skills:["archaeology" TO "archaeology"]', 1,
 -- Closing and reloading ----------------------------------------------------------------
 
 -- Closing destroys every control the editor made
-local window, slot = editor.window, row(1)
+local editorRoot, slot = editor.root, row(1)
 local fieldRoot = slot.fieldBox.root
 local saveRoot = editor.saveButton.root
 app:CloseEditor()
-assert(app.editor == nil and window.root.destroyed and fieldRoot.destroyed)
+assert(app.editor == nil and editorRoot.destroyed and fieldRoot.destroyed)
 assert(slot.maxField.root.destroyed and saveRoot.destroyed and editor.queryField.root.destroyed)
-assert(#editor.owned == 0 and editor.window == nil)
+assert(#editor.owned == 0 and editor.root == nil)
 -- Unloading the plugin closes an open editor
 press(controls.new)
-window = app.editor.window
+editorRoot = app.editor.root
 h.host:Unload("advancedbanksearch")
-assert(window.root.destroyed)
+assert(editorRoot.destroyed)
 -- A reload reads the conditions back
 h:LoadSearch()
 app = h:App()
@@ -512,21 +503,21 @@ assert(editor.draft.rules[1].field == "skills" and editor.draft.rules[1].value =
 assert(editor.preview.content == 'skills:["rune-supplies" TO "rune-supplies"]')
 engine.Catalog.Fields, engine.Catalog.Values = fieldsOf, valuesOf
 app:DependencyChanged("runeql", true)
--- Existing searches keep access to fields removed from the default menu
+-- Dose is available for new conditions as well as saved searches
 local doseBuilder = { match = "all", rules = { { field = "dose", operator = "equals", value = 3 } } }
 assert(app:SaveQuery(nil, "Existing doses", "dose:[3 TO 3]", doseBuilder))
 app:EditQuery(app.selectedQuery)
 assert(app.editor.mode == "visual" and app.editor.draft.rules[1].field == "dose")
 assert(shown(row(1).fieldBox) == "Dose" and app.editor.preview.content == "dose:[3 TO 3]")
 app:NewQuery()
-assert(#app.editor.fields == 11 and not labels(row(1).fieldBox):find("Dose", 1, true))
+assert(#app.editor.fields == 12 and labels(row(1).fieldBox):find("Dose", 1, true))
 local menus = {
     ["Item name"] = "has all words,has phrase",
-    ["Category"] = "is,is not",
-    ["Skills"] = "does not include,includes",
-    ["Types"] = "does not include,includes",
-    ["Combat style"] = "does not include,includes",
-    ["Slot"] = "does not include,includes",
+    ["Category"] = "is",
+    ["Skills"] = "includes",
+    ["Types"] = "includes",
+    ["Combat style"] = "includes",
+    ["Slot"] = "includes",
     ["Quantity"] = "is,is at least,is at most,is between",
     ["GE price"] = "is,is at least,is at most,is between",
     ["Tier"] = "is,is at least,is at most,is between",
@@ -538,19 +529,204 @@ for field, comparisons in pairs(menus) do
     assert(labels(row(1).operatorBox) == comparisons, field .. ": " .. labels(row(1).operatorBox))
 end
 choose(row(1).fieldBox, "Skills")
-choose(row(1).operatorBox, "does not include")
+press(row(1).negateButton)
 enter(row(1).valueField, "mining")
 enter(app.editor.nameField, "Without mining")
 press(app.editor.saveButton)
 local exclusionID = app.selectedQuery
 app:EditQuery(exclusionID)
-assert(app.editor.mode == "visual" and shown(row(1).operatorBox) == "does not include")
-assert(app.editor.draft.rules[1].operator == "excludes")
+assert(app.editor.mode == "visual" and shown(row(1).operatorBox) == "includes" and row(1).negateButton.active)
+assert(app.editor.draft.rules[1].operator == "includes" and app.editor.draft.rules[1].negate)
 -- Older word/phrase queries remain unchanged and editable in Advanced
 assert(app:SaveQuery(nil, "Legacy food", 'category:"food"',
     { match = "all", rules = { { field = "category", operator = "phrase", value = "food" } } }))
 app:EditQuery(app.selectedQuery)
 assert(app.editor.mode == "advanced" and app.editor.queryField:GetText() == 'category:"food"')
+-- Nested groups own their conditions and their AND/OR choices.
+app:NewQuery()
+editor = app.editor
+enter(editor.nameField, "Nested conditions")
+choose(row(1).fieldBox, "Quantity")
+choose(row(1).operatorBox, "is at least")
+enter(row(1).valueField, "10")
+press(editor.addGroupButton)
+assert(#editor.groupRows == 1 and #editor.ruleRows == 2)
+assert(editor.addButton.content.spriteID == id.Sprite.BP3_MISSION_PLUS_ICON)
+assert(editor.groupSlots[1].addButton.content.spriteID == id.Sprite.BP3_MISSION_PLUS_ICON)
+assert(editor.addGroupButton.content.spriteID == id.Sprite.MTX_STORE_BTN_PLUS_ACTIVE)
+assert(editor.groupSlots[1].groupButton.content.spriteID == id.Sprite.MTX_STORE_BTN_PLUS_ACTIVE)
+choose(row(2).fieldBox, "Category")
+enter(row(2).valueField, "food")
+press(editor.groupSlots[1].addButton)
+choose(row(3).fieldBox, "Dose")
+enter(row(3).valueField, "4")
+local nestedText = 'qty:[10 TO *] AND (category:["food" TO "food"] OR dose:[4 TO 4])'
+assert(editor.preview.content == nestedText, editor.preview.content)
+assert(row(2).fieldBox.root.x > row(1).fieldBox.root.x)
+local trashX = row(1).removeButton.root.x
+for index = 1, 3 do
+    assert(row(index).removeButton.root.x == trashX - (index > 1 and 6 or 0))
+    assert(row(index).removeButton.content.spriteID == id.Sprite.HUD_COMBAT_BTN_BIN)
+    local bang = row(index).negateButton.content
+    assert(bang.spriteID == id.Sprite.EXCLAMATION_MARK and bang.width == 10 and bang.height == 20)
+end
+assert(editor.groupSlots[1].removeButton.root.x == editor.groupSlots[1].groupButton.root.x + 34)
+assert(editor.groupSlots[1].removeButton.root.x < trashX)
+assert(editor.visualButton == nil and editor.advancedButton == nil and editor.body.root.y == 0)
+press(row(3).negateButton)
+assert(editor:Rule(3).negate and row(3).negateButton.active)
+press(row(3).negateButton)
+assert(editor.preview.content == nestedText)
+press(editor.groupSlots[1].groupButton)
+assert(#editor.groupRows == 2 and #editor.ruleRows == 4)
+enter(row(4).valueField, "iron")
+press(editor.groupSlots[2].removeButton)
+assert(#editor.groupRows == 1 and #editor.ruleRows == 3 and editor.preview.content == nestedText)
+press(editor.saveButton)
+local nestedID = app.selectedQuery
+app:EditQuery(nestedID)
+editor = app.editor
+assert(editor.mode == "visual" and #editor.groupRows == 1 and editor.preview.content == nestedText)
+local reloadedNested = getmetatable(app.queries).new():Get(nestedID)
+assert(reloadedNested.builder.rules[2].rules[2].field == "dose")
+
+-- Core destroys the previous layers on redraw. Drafts must live outside those controls.
+assert(app.settings:Set("editorMode", "advanced"))
+enter(editor.queryField, nestedText .. " OR name:lobster")
+enter(editor.nameField, "Unsaved nested name")
+assert(app.settings:Set("editorMode", "visual")) -- Preserve detached Advanced text across redraws too.
+assert(editor.preservedAdvanced == nestedText .. " OR name:lobster")
+editor.body:SetScrollPosition(90)
+local oldEditor, oldRoot = editor, editor.root
+oldEditor.nameField.GetText = function() error("read from retired input") end
+oldEditor.queryField.GetText = function() error("read from retired input") end
+local oldWidth = h.bankHost.itemLayer.width
+h.bankHost.itemLayer.width = 800
+assert(app.editorExt:Refresh())
+h:Tick(2)
+editor = app.editor
+assert(editor ~= oldEditor and oldEditor.destroyed and oldRoot.destroyed)
+assert(editor.mode == "visual" and editor.preservedAdvanced == nestedText .. " OR name:lobster" and editor.body.scrollY == 90)
+assert(editor.nameField:GetText() == "Unsaved nested name")
+assert(editor.queryField:GetText() == nestedText .. " OR name:lobster")
+assert(not editor.narrow and editor.preview.content == nestedText)
+assert(app.settings:Set("editorMode", "visual"))
+assert(editor.mode == "visual")
+local wideTrashX = row(1).removeButton.root.x
+assert(wideTrashX > trashX and row(3).removeButton.root.x == wideTrashX - 6)
+h.bankHost.itemLayer.width = oldWidth
+assert(app.editorExt:Refresh())
+h:Tick(2)
+editor = app.editor
+assert(editor.narrow and editor.nameField:GetText() == "Unsaved nested name")
+assert(editor.preview.content == nestedText and row(1).valueField.root.y > row(1).operatorBox.root.y)
+
+-- A hovered picker tooltip is destroyed on selection, filtering, paging and close.
+choose(row(2).fieldBox, "Skills")
+local picker = editor.pickerButtons[1]
+assert(picker.tooltip ~= nil)
+Harness.Fire(picker.root, ui.Hook.ONMOUSEOVER)
+local selectedTooltip = picker.tooltip
+assert(selectedTooltip.root.hidden == false)
+local selectedTooltipRoot = selectedTooltip.root
+press(picker)
+assert(selectedTooltipRoot.destroyed and picker.tooltip == nil and editor.pickerIndex == nil)
+choose(row(2).fieldBox, "Category")
+picker = editor.pickerButtons[1]
+Harness.Fire(picker.root, ui.Hook.ONMOUSEOVER)
+local filteredTooltipRoot = picker.tooltip.root
+enter(row(2).valueField, "wood-production")
+assert(filteredTooltipRoot.destroyed)
+press(row(2).clearButton)
+-- Clear is hidden while the value is empty; reopen all options directly.
+editor:OpenPicker(2, "")
+picker = editor.pickerButtons[1]
+Harness.Fire(picker.root, ui.Hook.ONMOUSEOVER)
+local pagedTooltipRoot = picker.tooltip.root
+press(editor.pickerNext)
+assert(pagedTooltipRoot.destroyed)
+picker = editor.pickerButtons[1]
+Harness.Fire(picker.root, ui.Hook.ONMOUSEOVER)
+local closingTooltipRoot = picker.tooltip.root
+editor:Close()
+assert(closingTooltipRoot.destroyed and app.editor == nil and app.editorExt == nil)
+
+-- The reported example: root OR compares two AND groups, not their individual conditions.
+app:NewQuery()
+editor = app.editor
+enter(editor.nameField, "Body price or head")
+press(editor.addGroupButton)
+press(row(1).removeButton) -- Remove the initial ungrouped condition.
+choose(editor.matchBox, "any condition (OR)")
+choose(editor.groupSlots[1].matchBox, "all conditions (AND)")
+choose(row(1).fieldBox, "GE price")
+choose(row(1).operatorBox, "is at least")
+enter(row(1).valueField, "1000")
+press(editor.groupSlots[1].addButton)
+choose(row(2).fieldBox, "Slot")
+enter(row(2).valueField, "body")
+press(editor.addGroupButton)
+choose(editor.groupSlots[2].matchBox, "all conditions (AND)")
+choose(row(3).fieldBox, "Slot")
+enter(row(3).valueField, "head")
+local bodyOrHead = '(price:[1000 TO *] AND slot:["body" TO "body"]) OR (slot:["head" TO "head"])'
+assert(editor.preview.content == bodyOrHead, editor.preview.content)
+assert(#editor.draft.rules == 2 and #editor.draft.rules[1].rules == 2)
+assert(editor.addButton.root.y == editor.matchBox.root.y)
+assert(editor.addButton.root.x > editor.matchBox.root.x)
+assert(editor.groupSlots[1].bottomEdge.root.y < editor.groupSlots[2].background.root.y)
+assert(editor.contentWidth == editor.width - 16 - 18)
+assert(editor.body.root.height == editor.root.height - editor.footer.root.height)
+local bodyFrame = editor.groupSlots[1].background.root
+local groupHeader = editor.groupSlots[1].matchBox.root
+assert(groupHeader.x - bodyFrame.x == 6 and groupHeader.y - bodyFrame.y == 6)
+local bodyValue = row(2).valueField.root
+assert(bodyFrame.x + bodyFrame.width - bodyValue.x - bodyValue.width == 6)
+assert(bodyFrame.x + bodyFrame.width - row(2).removeButton.root.x - row(2).removeButton.root.width == 6)
+for index, group in ipairs(editor.groupSlots) do
+    if index <= 2 then
+        assert(group.removeButton.root.x == group.groupButton.root.x + 34)
+        assert(group.removeButton.root.y == group.groupButton.root.y)
+        assert(group.removeButton.root.x < row(index).removeButton.root.x)
+        assert(group.background.root.clickthrough and group.edge.root.clickthrough)
+    end
+end
+assert(app.settings:Set("editorMode", "advanced"))
+assert(editor.queryField:GetText() == bodyOrHead)
+press(editor.saveButton)
+local groupedID = app.selectedQuery
+assert(app.settings:Set("editorMode", "visual"))
+app:EditQuery(groupedID)
+editor = app.editor
+assert(editor.mode == "visual" and editor.preview.content == bodyOrHead)
+assert(#editor.draft.rules[1].rules == 2 and #editor.draft.rules[2].rules == 1)
+-- Existing loose conditions retain their meaning, but are visibly outside every group.
+local looseBody = table.remove(editor.draft.rules[1].rules, 2)
+table.insert(editor.draft.rules, 2, looseBody)
+editor:SyncRows()
+editor:Changed()
+assert(editor.preview.content == '(price:[1000 TO *]) OR slot:["body" TO "body"] OR (slot:["head" TO "head"])')
+assert(editor.ruleRows[2].depth == 0 and row(2).fieldBox.root.x == 8)
+assert(row(2).fieldBox.root.y > editor.groupSlots[1].bottomEdge.root.y)
+assert(row(2).fieldBox.root.y < editor.groupSlots[2].background.root.y)
+press(editor.groupSlots[2].removeButton)
+assert(#editor.groupRows == 1 and #editor.ruleRows == 2 and editor:Rule(2).value == "body")
+editor:Close() -- Do not save this intentionally different tree.
+app:EditQuery(groupedID)
+assert(app.editor.preview.content == bodyOrHead)
+app.editor:Close()
+
+-- Leaving for a saved search retires the editor without reopening its previous page.
+app:NewQuery()
+local leavingEditor = app.editor
+assert(app:ChooseQuery(nestedID))
+h:Tick(2)
+assert(app.editor == nil and leavingEditor.destroyed and app:ShownPage() == "query")
+app:NewQuery()
+leavingEditor = app.editor
+app:OnBankClose()
+assert(app.editor == nil and leavingEditor.destroyed and app.editorExt == nil)
+
 h.host:Unload("advancedbanksearch")
 h.host:Unload("bankcore")
 print("query_editor_test: ok")

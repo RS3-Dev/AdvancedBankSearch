@@ -1,5 +1,5 @@
 -- Choose a saved search's folder or name a new folder
--- Bank Core's menus have no submenus, so folders are listed here
+-- Listed mode is the fallback for PrettyUI builds without folder submenus.
 
 local QueryStore = require("resources/search/query_store")
 
@@ -18,12 +18,15 @@ local BUTTON_GAP = 8
 function FolderDialog.new(parent, options)
     local self = setmetatable({ onChoose = options.onChoose, onSave = options.onSave, owned = {} }, FolderDialog)
     local listed = options.choices ~= nil
-    local fieldTop = listed and 40 + LIST_HEIGHT + 10 or 36
+    local dialogWidth = listed and WIDTH or 360
+    local margin = listed and MARGIN or 16
+    local controlWidth = listed and CONTENT_WIDTH or 312
+    local fieldTop = listed and 40 + LIST_HEIGHT + 10 or 31
     -- Room for the field, status, buttons, and window frame
-    local height = fieldTop + 136
+    local height = listed and fieldTop + 136 or 176
     self.window = prettyui.Window.new(parent, {
-        title = options.title, x = -math.floor(WIDTH / 2), y = -math.floor(height / 2),
-        xAnchor = 0.5, yAnchor = 0.5, width = WIDTH, height = height, minWidth = WIDTH, maxWidth = WIDTH,
+        title = options.title, x = -math.floor(dialogWidth / 2), y = -math.floor(height / 2),
+        xAnchor = 0.5, yAnchor = 0.5, width = dialogWidth, height = height, minWidth = dialogWidth, maxWidth = dialogWidth,
         minHeight = height, maxHeight = height, scrollable = false, destroyOnClose = true,
         onClose = options.onClose,
     })
@@ -34,7 +37,7 @@ function FolderDialog.new(parent, options)
         owned[#owned + 1] = control
         return control
     end
-    own(prettyui.Text.new(content, { text = options.heading, x = MARGIN, y = 8, width = CONTENT_WIDTH, height = 24,
+    own(prettyui.Text.new(content, { text = options.heading, x = margin, y = listed and 8 or 10, width = controlWidth, height = listed and 24 or 20,
         colour = 0xE7C878FF, maxLines = 1 }))
     if listed then
         local entries = {}
@@ -42,27 +45,27 @@ function FolderDialog.new(parent, options)
             entries[index] = { id = choice.id, label = choice.label, textColour = 0xE7D7B0FF }
         end
         self.list = own(prettyui.List.new(content, {
-            x = MARGIN, y = 40, width = CONTENT_WIDTH, height = LIST_HEIGHT, entryHeight = ROW_HEIGHT,
+            x = margin, y = 40, width = controlWidth, height = LIST_HEIGHT, entryHeight = ROW_HEIGHT,
             maxSelected = 1, backgroundColour = 0x00000000, borderColour = 0x806432FF, selectedColour = 0x5A4526FF,
             _onEntryClick = function(_, choiceID) self:Finish(self.onChoose(choiceID)) end,
         }))
         self.list:SetEntries(entries)
     end
     self.field = own(prettyui.TextField.new(content, {
-        x = MARGIN, y = fieldTop, width = CONTENT_WIDTH, height = 30, text = options.text or "",
+        x = margin, y = fieldTop, width = controlWidth, height = 30, text = options.text or "",
         placeholder = options.placeholder or "Folder name", maxLength = QueryStore.MAX_NAME_LENGTH,
         onSubmit = function() self:Save() end,
     }))
-    self.status = own(prettyui.Text.new(content, { text = "", x = MARGIN, y = fieldTop + 36, width = CONTENT_WIDTH,
+    self.status = own(prettyui.Text.new(content, { text = "", x = margin, y = listed and fieldTop + 36 or 70, width = controlWidth,
         height = 18, colour = 0xE57373FF, maxLines = 1 }))
     self.status.hidden = true
-    local buttonTop = fieldTop + 36 + 24
-    local buttonWidth = math.floor((CONTENT_WIDTH - BUTTON_GAP) / 2)
+    local buttonTop = listed and fieldTop + 36 + 24 or 96
+    local buttonWidth = math.floor((controlWidth - BUTTON_GAP) / 2)
     self.cancelButton = own(prettyui.SimpleButton.new(content, "Cancel", function() self.window:Close() end, {
-        x = MARGIN, y = buttonTop, width = buttonWidth, height = 28,
+        x = margin, y = buttonTop, width = buttonWidth, height = 28,
     }))
     self.saveButton = own(prettyui.SimpleButton.new(content, options.saveLabel or "Save", function() self:Save() end, {
-        x = MARGIN + buttonWidth + BUTTON_GAP, y = buttonTop, width = CONTENT_WIDTH - buttonWidth - BUTTON_GAP,
+        x = margin + buttonWidth + BUTTON_GAP, y = buttonTop, width = controlWidth - buttonWidth - BUTTON_GAP,
         height = 28,
     }))
     return self
