@@ -1,5 +1,7 @@
+local Text = require("resources/core/text")
+
 -- Ported from Bank Tags windows/import_share.lua with query-specific data callbacks.
--- Preview imported tags and display share codes
+-- Preview imported queries and display share codes
 
 local Code = require("resources/search/query_code")
 
@@ -24,7 +26,7 @@ local STATUS_ERROR = 0xE57373FF
 local function text(parent, value, y, options)
     options = options or {}
     return prettyui.Text.new(parent, {
-        text = value,
+        text = Text.sanitize(value),
         x = options.x or 18,
         y = y,
         width = options.width or 452,
@@ -94,7 +96,7 @@ function ImportShare:Build(parent, options)
     self.controls.importCodeLabel = text(importPage.content, "Import code", 32, {
         height = 20, maxLines = 1,
     })
-    self.importField = prettyui.TextField.new(importPage.content, {
+    self.importField = Text.newField(importPage.content, {
         x = 18,
         y = 56,
         width = 452,
@@ -113,7 +115,7 @@ function ImportShare:Build(parent, options)
         font = id.Font.MUSEO_SANS_11PT_REGULAR,
         alignHorizontal = ui.AlignMode.CENTRE,
     })
-    self.importNameField = prettyui.TextField.new(importPage.content, {
+    self.importNameField = Text.newField(importPage.content, {
         x = 18, y = 127, width = 404, height = 30,
         placeholder = "Query name", maxLength = 40, maxLines = 1,
         disabled = true,
@@ -141,7 +143,7 @@ function ImportShare:Build(parent, options)
         maxVisibleEntries = 6,
         onChange = function() self:UpdateImportFolderControls() end,
     })
-    self.importFolderName = prettyui.TextField.new(importPage.content, {
+    self.importFolderName = Text.newField(importPage.content, {
         x = 18, y = FOLDER_NAME_Y, width = 452, height = 30,
         placeholder = "New folder name", maxLength = 40,
         maxLines = 1, disabled = true,
@@ -172,8 +174,8 @@ function ImportShare:Build(parent, options)
         font = id.Font.CINZEL_13PT_BOLD,
     })
     self.controls.shareCopy = text(sharePage.content,
-        "Each field contains a query code or a complete backup. Click a field, then press Ctrl+A and Ctrl+C.",
-        38, { height = 32, maxLines = 2 })
+        "Click a code, then Ctrl+A and Ctrl+C to copy.",
+        38, { height = 24, maxLines = 1 })
     self:RefreshExports()
     self.ready = true
     self:RefreshImportPreview("")
@@ -182,7 +184,7 @@ end
 
 -- Show feedback in green, red, or a given colour
 function ImportShare:SetPageStatus(control, value, success)
-    control.content = tostring(value or "")
+    control.content = Text.sanitize(value)
     control.rgba = success and STATUS_SUCCESS or STATUS_ERROR
     control.hidden = value == nil or value == ""
 end
@@ -198,26 +200,27 @@ function ImportShare:DestroyShareRows()
     self.shareRows = {}
 end
 
--- Create a row to copy each tag's share code
+-- Create a row to copy each query's share code
 function ImportShare:RebuildShareRows(exports)
     self:DestroyShareRows()
     local startY = 74
-    local rowHeight = 34
+    local rowHeight = 82
     for index, export in ipairs(exports) do
         local root = ui.Layer.new(self.sharePage.content)
         root:SetPos(18, startY + (index - 1) * rowHeight)
-        root:SetSize(452, 30)
+        root:SetSize(452, 78)
         root.clickthrough = true
         local label = prettyui.Text.new(root, {
-            text = export.name,
+            text = Text.plain(export.name),
             x = 0,
             y = 0,
-            width = 202,
-            height = 28,
+            width = 452,
+            height = 42,
+            font = id.Font.MUSEO_SANS_11PT_REGULAR,
             colour = export.value ~= nil and 0xD8CCAEFF or 0xE57373FF,
-            maxLines = 1,
+            maxLines = 2,
             alignVertical = ui.AlignMode.CENTRE,
-            tooltip = export.reason,
+            tooltip = Text.plain(export.reason or export.name),
         })
         local value = export.value or tostring(export.reason or "Unavailable")
         local tooLarge = #value > Code.INPUT_LIMIT
@@ -225,15 +228,15 @@ function ImportShare:RebuildShareRows(exports)
             value = "Too large for the game field (" .. tostring(#value) .. " characters)"
             label.rgba = 0xE57373FF
         end
-        local field = prettyui.TextField.new(root, {
-            x = 210,
-            y = 1,
-            width = 242,
+        local field = Text.newField(root, {
+            x = 0,
+            y = 46,
+            width = 452,
             height = 27,
             maxLength = Code.INPUT_LIMIT,
             maxLines = 1,
             font = id.Font.MUSEO_SANS_11PT_REGULAR,
-            text = value,
+            text = Text.sanitize(value),
         })
         self.shareRows[#self.shareRows + 1] = {
             tag = export.name,

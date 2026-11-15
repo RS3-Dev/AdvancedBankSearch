@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Choose a saved search's folder or name a new folder
 -- Listed mode is the fallback for PrettyUI builds without folder submenus.
 
@@ -37,12 +39,12 @@ function FolderDialog.new(parent, options)
         owned[#owned + 1] = control
         return control
     end
-    own(prettyui.Text.new(content, { text = options.heading, x = margin, y = listed and 8 or 10, width = controlWidth, height = listed and 24 or 20,
+    own(prettyui.Text.new(content, { text = Text.plain(options.heading), x = margin, y = listed and 8 or 10, width = controlWidth, height = listed and 24 or 20,
         colour = 0xE7C878FF, maxLines = 1 }))
     if listed then
         local entries = {}
         for index, choice in ipairs(options.choices) do
-            entries[index] = { id = choice.id, label = choice.label, textColour = 0xE7D7B0FF }
+            entries[index] = { id = choice.id, label = Text.plain(choice.label), textColour = 0xE7D7B0FF }
         end
         self.list = own(prettyui.List.new(content, {
             x = margin, y = 40, width = controlWidth, height = LIST_HEIGHT, entryHeight = ROW_HEIGHT,
@@ -51,7 +53,7 @@ function FolderDialog.new(parent, options)
         }))
         self.list:SetEntries(entries)
     end
-    self.field = own(prettyui.TextField.new(content, {
+    self.field = own(Text.newField(content, {
         x = margin, y = fieldTop, width = controlWidth, height = 30, text = options.text or "",
         placeholder = options.placeholder or "Folder name", maxLength = QueryStore.MAX_NAME_LENGTH,
         onSubmit = function() self:Save() end,
@@ -77,7 +79,7 @@ function FolderDialog:Finish(ok, reason)
     if ok then
         self.window:Close()
     else
-        self.status.content = tostring(reason or "Could not save the folder.")
+        self.status.content = Text.sanitize(reason or "Could not save the folder.")
         self.status.hidden = false
     end
 end

@@ -55,7 +55,7 @@ function SpritePicker.new(parent, options)
     })
 
     local content = self.window.content
-    self.field = prettyui.TextField.new(content, {
+    self.field = Text.newField(content, {
         x = MARGIN,
         y = 10,
         width = FIELD_WIDTH,
@@ -100,7 +100,7 @@ end
 -- Show a status message in the picker
 function SpritePicker:SetStatus(message, colour)
     if self.status == nil then return end
-    self.status.content = tostring(message or "")
+    self.status.content = Text.sanitize(message)
     self.status.rgba = colour or MUTED
 end
 
@@ -137,7 +137,7 @@ function SpritePicker:ShowResults(results, totalMatches, limited)
             hit:SetSize(SLOT_SIZE, SLOT_SIZE)
             hit.clickthrough = false
             hit:MoveToFront()
-            local tooltipText = tostring(result.displayName)
+            local tooltipText = Text.plain(result.displayName)
             local tooltip = prettyui.Tooltip.attach(slot.root, self.grid.root, tooltipText)
             -- Show the hovered search item's name
             hit:Subscribe(ui.Hook.ONMOUSEOVER, function()

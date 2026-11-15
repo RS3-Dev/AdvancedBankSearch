@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- The Bank Tags import preview flow, adapted to portable query metadata.
 local ItemIdentity = require("resources/search/item_identity")
 local ObjectConfig = require("resources/search/object_config")
@@ -44,7 +46,7 @@ function Draft:RefreshImportFolders(selectedID, reset)
     local available, matching = { [NO_FOLDER] = true, [NEW_FOLDER] = true }, {}
     for _, folder in ipairs(self.options.onGetFolders()) do
         local key = "folder:" .. folder.id
-        entries[#entries + 1] = { id = key, label = folder.name, order = #entries + 1 }
+        entries[#entries + 1] = { id = key, label = Text.plain(folder.name), order = #entries + 1 }
         available[key], matching[string.lower(folder.name)] = true, key
     end
     local single = self.importSingleQuery
@@ -56,7 +58,7 @@ function Draft:RefreshImportFolders(selectedID, reset)
                 if folder.key == single.folder then
                     initial = "shared:" .. folder.key
                     available[initial] = true
-                    entries[#entries + 1] = { id = initial, label = folder.name, order = #entries + 1 }
+                    entries[#entries + 1] = { id = initial, label = Text.plain(folder.name), order = #entries + 1 }
                 end
             end
         end

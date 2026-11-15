@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Search field and the Bank Tags-style draggable query tree.
 local BankControls = require("resources/search/bank_controls")
 local QueryList = require("resources/search/query_list")
@@ -75,7 +77,7 @@ function SearchTab:RefreshStatus()
     -- Match counts stay out of the interface; only warnings cover the bank title.
     local message = self.app.statusIsError and self.app.status or nil
     controls.statusBanner.hidden = message == nil
-    controls.statusText.content = message or ""
+    controls.statusText.content = Text.sanitize(message)
 end
 
 function SearchTab:Build()
@@ -90,7 +92,7 @@ function SearchTab:Build()
         local ox, oy = windowPosition(ctx.overlay)
         return x - ox, y - oy
     end)
-    controls.field = prettyui.TextField.new(parent, {
+    controls.field = Text.newField(parent, {
         x = X, y = SidebarRows.SEARCH_TOP, width = width, height = SidebarRows.SEARCH_HEIGHT,
         placeholder = "Search items...", text = app.draft, maxLength = 9999,
         onChange = function(_, _, content) app:QueueText(content) end,

@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Edit saved query names and expressions
 -- Queries are built from visual conditions or typed as RuneQL in Advanced
 
@@ -42,7 +44,7 @@ end
 -- Give native combos IDs matching their sorted labels
 local function entriesOf(choices)
     local entries = {}
-    for index, choice in ipairs(choices) do entries[index] = { id = index, label = choice.label } end
+    for index, choice in ipairs(choices) do entries[index] = { id = index, label = Text.plain(choice.label) } end
     return entries
 end
 
@@ -182,7 +184,7 @@ function QueryEditor:Build(parent, options)
         colour = LABEL_COLOUR,
         font = id.Font.CINZEL_13PT_BOLD,
     }))
-    self.nameField = self:Own(prettyui.TextField.new(self.content, {
+    self.nameField = self:Own(Text.newField(self.content, {
         x = MARGIN,
         y = 27,
         width = self.contentWidth - 48,
@@ -361,7 +363,7 @@ function QueryEditor:BuildRow(index)
         iconWidth = 10, iconHeight = 20,
         tooltip = "Exclude this condition (NOT). Items without this field are excluded too." }))
     slot.kind = "text"
-    slot.valueField = self:Own(prettyui.TextField.new(content, {
+    slot.valueField = self:Own(Text.newField(content, {
         x = self.valueX,
         y = top,
         width = self.valueWidth,
@@ -405,7 +407,7 @@ function QueryEditor:BuildRow(index)
     end)
     prettyui.Tooltip.bind(clear, clear.root, content, "Clear value")
     slot.clearButton = clear
-    slot.minField = self:Own(prettyui.TextField.new(content, {
+    slot.minField = self:Own(Text.newField(content, {
         x = self.valueX,
         y = top,
         width = self.boundWidth,
@@ -426,7 +428,7 @@ function QueryEditor:BuildRow(index)
         alignHorizontal = ui.AlignMode.CENTRE,
         alignVertical = ui.AlignMode.CENTRE,
     }))
-    slot.maxField = self:Own(prettyui.TextField.new(content, {
+    slot.maxField = self:Own(Text.newField(content, {
         x = self.valueX + self.valueWidth - self.boundWidth,
         y = top,
         width = self.boundWidth,
@@ -501,8 +503,8 @@ function QueryEditor:LayoutPicker(top, shown)
         button:SetTooltip(nil)
         setHidden(button, not shown or value == nil)
         if value ~= nil then
-            button.content.content = value.label
-            if shown then button:SetTooltip(value.label) end
+            button.content.content = Text.plain(value.label)
+            if shown then button:SetTooltip(Text.plain(value.label)) end
             button.root:SetPos(MARGIN + ((index - 1) % self.pickerColumns) * (width + 6),
                 top + math.floor((index - 1) / self.pickerColumns) * PICKER_ROW_HEIGHT)
         end
@@ -540,7 +542,7 @@ function QueryEditor:BuildAdvanced(query)
         maxLines = 1,
         alignVertical = ui.AlignMode.CENTRE,
     }), group)
-    self.queryField = self:Own(prettyui.TextField.new(content, {
+    self.queryField = self:Own(Text.newField(content, {
         x = MARGIN,
         y = PANEL_TOP + 22,
         width = self.contentWidth,
@@ -874,7 +876,7 @@ function QueryEditor:Changed()
     if not self.ready then return end
     self:ClearStatus()
     local query = QueryBuilder.Build(self.draft)
-    self.preview.content = query or ""
+    self.preview.content = Text.sanitize(query)
     self.preview.rgba = query ~= nil and PREVIEW_COLOUR or HINT_COLOUR
 end
 
@@ -889,7 +891,7 @@ end
 -- Show validation feedback, hiding the message when it is empty
 function QueryEditor:SetStatus(value)
     self.statusText = value
-    self.status.content = tostring(value or "")
+    self.status.content = Text.sanitize(value)
     self.status.hidden = value == nil or value == ""
     -- Reserve feedback space only while there is a message to display.
     local messageHeight = self.status.hidden and 0 or STATUS_HEIGHT

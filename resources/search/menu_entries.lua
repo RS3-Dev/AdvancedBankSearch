@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Adapted from Bank Tags: ui/menu_entries.lua
 -- Find and position added menu actions in the client's order
 
@@ -33,8 +35,8 @@ end
 
 -- Write an entry's label, with its subject in gold
 function MenuEntries.Text(label, subject)
-    if subject == nil then return label end
-    return label .. " <col=" .. NAME_COLOUR .. ">" .. subject .. "</col>"
+    if subject == nil then return Text.plain(label) end
+    return Text.plain(label) .. " <col=" .. NAME_COLOUR .. ">" .. Text.plain(subject) .. "</col>"
 end
 
 -- Add one entry and find where the host put it

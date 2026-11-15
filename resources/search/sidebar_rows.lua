@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Adapted from Bank Tags: ui/sidebar_rows.lua
 -- Build the tag column's search field, row list, and row decorations
 
@@ -58,7 +60,7 @@ end
 
 -- Create the search field above the rows
 function SidebarRows.CreateSearch(parent, width, options)
-    return prettyui.TextField.new(parent, {
+    return Text.newField(parent, {
         x = SidebarRows.CONTENT_X,
         y = SidebarRows.SEARCH_TOP,
         width = width,
@@ -73,7 +75,7 @@ end
 -- Create the message shown when no rows are visible
 function SidebarRows.CreateEmptyLabel(parent, width, text)
     return prettyui.Text.new(parent, {
-        text = text,
+        text = Text.plain(text),
         x = SidebarRows.CONTENT_X + 1,
         y = SidebarRows.LIST_TOP + 6,
         width = width - 2,

@@ -492,7 +492,7 @@ function QueryStore:MoveToFolder(queryID, folderID)
     return self:Commit(nextData)
 end
 
--- Bank Tags keeps icon references by config name, with #id for unknown configs.
+-- Keep icon references by config name, with #id for unknown configs.
 function QueryStore:GetQuerySprite(queryID)
     local record = self:Get(queryID)
     return record and ItemIdentity.ObjectID(record.icon) or nil

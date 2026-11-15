@@ -8,7 +8,7 @@ local Build = {}
 
 Build.DEFAULT_OUT = "dist/release"
 Build.MANIFEST = "build_manifest.lua"
-Build.PLUGIN = { name = "advancedbanksearch", entry = "plugins/advancedbanksearch/main",
+Build.PLUGIN = { name = "advancedbanksearch", displayName = "Advanced Bank Search", entry = "plugins/advancedbanksearch/main",
     manifest = "plugins/advancedbanksearch/plugin.json" }
 -- Entry line the build replaces with the module list
 Build.EVICTION_MARKER = "-- build: every module this plugin loads"
@@ -199,7 +199,7 @@ function Build.Run(options)
         file.bytes = file.entry and Build.Entry() or readFile(file.source)
         if file.manifest then
             local ok, manifest = pcall(Json.decode, file.bytes)
-            if not ok or type(manifest) ~= "table" or manifest.name ~= Build.PLUGIN.name then
+            if not ok or type(manifest) ~= "table" or manifest.name ~= Build.PLUGIN.displayName then
                 error(file.source .. " does not decode as the " .. Build.PLUGIN.name .. " manifest", 0)
             end
         end

@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Show RuneQL search and saved queries through Bank Core's API
 -- RuneQL and GE Prices are read only while reported loaded
 
@@ -330,7 +332,7 @@ function App:BuildPage(pageID)
     local outcome = self:Run(text, excludePlaceholders)
     if outcome.state == "prices_loading" and self.pricesFailed then outcome = { state = "prices_failed" } end
     if record ~= nil then self.counts[record.id] = outcome.state == "ok" and #outcome.matches or nil end
-    return { title = title, rows = rowsFor(outcome) }, outcome
+    return { title = Text.plain(title), rows = rowsFor(outcome) }, outcome
 end
 
 -- Rank a page and give it to Bank Core, which redraws it in place while it shows
@@ -660,7 +662,7 @@ function App:OpenDeleteConfirm(queryID)
     local parent, record = windowParent(), self.queries:Get(queryID)
     if parent == nil or record == nil then return false end
     self.deleteConfirm = ConfirmWindow.new(parent, {
-        title = "Delete Query", message = 'Delete "' .. record.name .. '"?<br><br>Do you wish to continue?',
+        title = "Delete Query", message = 'Delete "' .. Text.plain(record.name) .. '"? Do you wish to continue?',
         onConfirm = function()
             if self.queries:Get(queryID) == nil then return false, "That query no longer exists." end
             self.selectedQuery, self.confirmDelete = queryID, queryID

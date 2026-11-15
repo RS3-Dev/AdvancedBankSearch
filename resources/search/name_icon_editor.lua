@@ -1,5 +1,7 @@
+local Text = require("resources/core/text")
+
 -- Adapted from Bank Tags: windows/tag_settings_editor.lua
--- Edit a tag's name and icon
+-- Edit a query or folder name and icon
 
 local objectFromID = require("resources/search/object_config").FromID
 
@@ -52,7 +54,7 @@ function TagSettingsEditor.new(parent, options)
         height = 20,
         colour = 0xF2C66DFF,
     })
-    self.field = prettyui.TextField.new(content, {
+    self.field = Text.newField(content, {
         x = MARGIN,
         y = 31,
         width = FIELD_WIDTH,
@@ -120,7 +122,7 @@ function TagSettingsEditor:Save(value)
     if success then
         self.window:Close()
     else
-        self.status.content = tostring(reason or "Could not save the query.")
+        self.status.content = Text.sanitize(reason or "Could not save the query.")
         self.status.rgba = 0xE57373FF
         self.status.hidden = false
     end

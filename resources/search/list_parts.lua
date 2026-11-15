@@ -16,7 +16,7 @@ local function folderKeyOf(entryID)
     return string.sub(entryID, #FOLDER_ENTRY_PREFIX + 1)
 end
 
--- Describe a row as a tag or folder
+-- Describe a row as a query or folder
 local function sidebarEntry(entryID)
     local folderKey = folderKeyOf(entryID)
     if folderKey ~= nil then return { kind = "folder", id = folderKey } end

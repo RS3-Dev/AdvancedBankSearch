@@ -1,3 +1,5 @@
+local Text = require("resources/core/text")
+
 -- Ported from Bank Tags sidebar/tag_list.lua; query IDs and names replace tag names.
 -- Draw selectable, draggable queries and folders in the sidebar
 
@@ -60,7 +62,7 @@ function QueryList.new(parent, options)
     local contentWidth = SidebarRows.ContentWidth(self.width)
     self.emptyLabel = SidebarRows.CreateEmptyLabel(parent, contentWidth,
         "No saved searches yet. Press New to save one.")
-    -- PrettyUI's own row press is the only press Bank Tags hears; it starts the gesture
+    -- PrettyUI's own row press starts the query list gesture
     self.list = SidebarRows.CreateList(parent, contentWidth, options.listHeight, function(_, entryID)
         self:Press(entryID)
     end)
@@ -68,7 +70,7 @@ function QueryList.new(parent, options)
     return self
 end
 
--- List visible tags and folders in sidebar order
+-- List visible queries and folders in sidebar order
 function QueryList:Entries()
     local entries, rowNumber = {}, 0
     -- Choose alternating row colours, warmer inside folders
@@ -81,7 +83,7 @@ function QueryList:Entries()
     local function addQuery(record, folderID)
         entries[#entries + 1] = {
             id = record.id,
-            label = record.name,
+            label = Text.plain(record.name),
             selected = self.isSelected(record.id), enabled = true,
             backgroundColour = rowColour(folderID ~= nil), hoverColour = Theme.ROW_HOVER,
             selectedColour = Theme.ROW_SELECTED, textColour = SidebarRows.ROW_TEXT, folder = folderID,
@@ -97,7 +99,7 @@ function QueryList:Entries()
             end
             local expanded = not node.collapsed
             entries[#entries + 1] = {
-                id = FOLDER_ENTRY_PREFIX .. node.id, label = node.name, enabled = true,
+                id = FOLDER_ENTRY_PREFIX .. node.id, label = Text.plain(node.name), enabled = true,
                 expanded = expanded, memberCount = #node.queries,
                 selected = containsSelected and not expanded, backgroundColour = FOLDER_ROW,
                 hoverColour = Theme.ROW_HOVER, selectedColour = Theme.ROW_SELECTED, textColour = Theme.HEADING_TEXT,

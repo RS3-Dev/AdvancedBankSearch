@@ -157,7 +157,7 @@ function TagListDrag:DropTarget(y)
     local gesture = self.gesture
     local rows = gesture.rows
     local index = math.max(1, math.min(#rows, math.floor(y / ENTRY_HEIGHT) + 1))
-    -- A folder's tag stays among that folder's tags
+    -- A folder's query stays among that folder's queries
     if gesture.folder ~= nil and self.entriesByID[rows[index].entry.id].folder ~= gesture.folder then
         return nil
     end
