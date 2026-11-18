@@ -1,6 +1,6 @@
 # Advanced Bank Search tests
 
-Run every test, the build, and the compile and globals check from the repository root:
+Run every test and the compile and globals check from the repository root:
 
 ```text
 set BANKCORE_ROOT=C:\path\to\bank-utilities
@@ -9,7 +9,7 @@ set PRETTYUI_ROOT=C:\path\to\prettyui-checkout
 lua54 tools/check.lua
 ```
 
-Tests that load Bank Core read it, unchanged, from the checkout `BANKCORE_ROOT` names; there is no default, so a stale sibling checkout is never tested against by accident. They use Bank Core's own stand-in host (`tools/test_support/fake_bank_host.lua` and `fake_plugin_host.lua` in that checkout) and load Bank Core's `plugins/bankcore/main.lua` with its own module cache, beside the Advanced Bank Search folder the build writes under `dist/test/`. Nothing from Bank Core is copied into Advanced Bank Search or its package.
+Tests that load Bank Core read it, unchanged, from the checkout `BANKCORE_ROOT` names; there is no default, so a stale sibling checkout is never tested against by accident. They use Bank Core's own stand-in host (`tools/test_support/fake_bank_host.lua` and `fake_plugin_host.lua` in that checkout) and load Bank Core's root `main.lua` with its own module cache, beside the Advanced Bank Search repository root. Nothing from Bank Core is copied into Advanced Bank Search or its package.
 
 Tests that rank load the installed RuneQL plugin, read-only, from `RUNEQL_ROOT`, so ranking runs on RuneQL's real `Compile`, `Score`, and `Requirements`. Sprite buttons and tooltips are PrettyUI's real `src/sprite_button.lua` and `src/tooltip.lua`, read-only, from the checkout `PRETTYUI_ROOT` names, over Bank Core's stand-in components, so the column can call only methods PrettyUI defines and its tooltip layers are really made and destroyed. The sprite table is Bank Core's stand-in, tooltips have no frame sprites, and the cursor sets nothing. The stand-in components keep each named subscription beside the unnamed one, as the client does, so a test can fire a button's own hover and its tooltip's together. The host log keeps each line, so a test that finds the column unmounted names the error Bank Core logged. A test that needs a bank item's right-click menu gives it the item's component data and marks the stand-in item layer as the bank's interface, as the client reports it.
 

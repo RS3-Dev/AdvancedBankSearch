@@ -1,4 +1,4 @@
--- Build, run every test, and check the built runtime files
+-- Run every test and check the directly installable runtime files
 -- Usage from the repository root: lua54 tools/check.lua
 -- Tests that load Bank Core read it from BANKCORE_ROOT
 -- Each test runs in its own process since host stand-ins differ
@@ -38,31 +38,30 @@ end
 
 local failures = 0
 
--- Compile the built folder, since that is what the client loads
-local Build = require("tools/build")
-local built, build = pcall(Build.Run, { out = "dist/check" })
-if not built then
-    print("BUILD FAILED " .. tostring(build))
-    os.exit(1)
+-- Check the exact source runtime that users install
+local ModuleGraph = require("tools/module_graph")
+local modules = ModuleGraph.PluginModules("main")
+local runtime, shipped = { "main.lua" }, { ["main.lua"] = true }
+for _, name in ipairs(modules) do
+    runtime[#runtime + 1] = name .. ".lua"
+    shipped[name .. ".lua"] = true
 end
-local runtime, shipped, strays = {}, {}, 0
-for _, file in ipairs(build.files) do
-    if string.match(file.path, "%.lua$") then runtime[#runtime + 1] = build.folder .. "/" .. file.path end
-    shipped[file.source] = true
-    if string.match(file.source, "^reference/") or string.match(file.source, "^tests/")
-        or string.match(file.source, "^tools/") then
+local entry = assert(ModuleGraph.Source("main"))
+local orphans, strays = 0, 0
+for _, name in ipairs(modules) do
+    if not entry:find('"' .. name .. '"', 1, true) then
+        orphans = orphans + 1
+        print("MISSING RELOAD MODULE " .. name)
+    end
+    if name:sub(1, 10) ~= "resources/" then
         strays = strays + 1
-        print("SHIPPED " .. file.source .. " is not runtime source")
+        print("NON-RUNTIME MODULE " .. name)
     end
 end
-print(("built %d files into %s"):format(#build.files, build.folder))
-
--- A runtime source the entry never loads would never ship
-local orphans = 0
-for _, path in ipairs(trackedFiles('"plugins/*.lua"', '"resources/*.lua"')) do
+for _, path in ipairs(trackedFiles('"resources/*.lua"')) do
     if not shipped[path] then
         orphans = orphans + 1
-        print("NOT SHIPPED " .. path .. " is loaded by nothing")
+        print("UNUSED RUNTIME " .. path)
     end
 end
 
@@ -115,7 +114,7 @@ for _, path in ipairs(runtime) do
         end
     end
 end
-print(("%d of %d built runtime files compile with no unexpected globals"):format(
+print(("%d of %d runtime files compile with no unexpected globals"):format(
     #runtime - globalProblems, #runtime))
 
 os.exit(failures == 0 and globalProblems == 0 and orphans == 0 and strays == 0 and 0 or 1)

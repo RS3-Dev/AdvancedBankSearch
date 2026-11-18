@@ -128,7 +128,7 @@ function ModuleGraph.Code(source)
     return table.concat(out)
 end
 
--- List the modules an entry loads, such as plugins/advancedbanksearch/main
+-- List the modules an entry loads, such as main
 function ModuleGraph.PluginModules(entry)
     local names = {}
     for _, name in ipairs((ModuleGraph.Closure({ entry }))) do

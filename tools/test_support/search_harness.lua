@@ -1,4 +1,4 @@
--- Load Bank Core from BANKCORE_ROOT beside the built Advanced Bank Search
+-- Load Bank Core from BANKCORE_ROOT beside the source Advanced Bank Search
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 -- Kept outside tests/ so tools/check.lua does not run it
 
@@ -460,9 +460,7 @@ function Harness.new(name, options)
     prettyui.Tooltip = Harness.LoadTooltip(Harness.PrettyUIRoot())
     prettyui.SpriteButton = Harness.LoadSpriteButton(Harness.PrettyUIRoot())
     prettyui.ComboBox = Harness.LoadComboBox(Harness.PrettyUIRoot())
-    local Build = require("tools/build")
-    local out = "dist/test/" .. name
-    local built = Build.Run({ out = out })
+    local built = { folder = "." }
     local Loader = require("tools/test_support/fake_plugin_host")
     -- Older Core test hosts read `dependencies`. Adapt the documented manifest key
     -- without changing Core or the plugin package.
