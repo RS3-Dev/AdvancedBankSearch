@@ -1,6 +1,6 @@
 -- Load Bank Core from BANKCORE_ROOT beside the source Advanced Bank Search
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
--- Kept outside tests/ so tools/check.lua does not run it
+-- Support modules are loaded by tests, not run as test cases
 
 local Harness = {}
 
@@ -38,7 +38,7 @@ function Harness.CoreRoot()
                 .. "to a checkout with the extension API Advanced Bank Search uses", 0)
         end
     end
-    -- This repository's tools come first, then Bank Core's
+    -- Resolve local test support before Bank Core's helpers
     if not string.find(package.path, root .. "/?.lua", 1, true) then
         package.path = package.path .. ";" .. root .. "/?.lua"
     end
@@ -532,7 +532,7 @@ end
 
 -- Load the installed RuneQL from RUNEQL_ROOT as its own plugin
 function Harness:LoadRuneQL()
-    local root = require("tools/test_support/runeql").Root()
+    local root = require("tests/support/runeql").Root()
     self.runeql = self.host:Load("runeql", root)
     return self.runeql
 end

@@ -1,6 +1,6 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 local h = Harness.new("settings")
 local manifest = assert(io.open(h.searchFolder .. "/plugin.json", "rb"))
 assert(manifest:read("a"):find('"hasSettingsIcon": true', 1, true))

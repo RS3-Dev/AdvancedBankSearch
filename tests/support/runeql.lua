@@ -1,5 +1,5 @@
 -- Load the installed RuneQL API from RUNEQL_ROOT, read-only
--- Kept outside tests/ so tools/check.lua does not run it
+-- Support modules are loaded by tests, not run as test cases
 
 local RuneQL = {}
 

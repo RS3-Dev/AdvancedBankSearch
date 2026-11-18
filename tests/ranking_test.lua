@@ -4,7 +4,7 @@ package.path = "./?.lua;" .. package.path
 
 local Ranking = require("resources/search/ranking")
 local ItemFields = require("resources/search/item_fields")
-local runeql = require("tools/test_support/runeql").Load()
+local runeql = require("tests/support/runeql").Load()
 
 local NAMES = {
     [101] = { name = "Iron bar", configName = "IRON_BAR" },

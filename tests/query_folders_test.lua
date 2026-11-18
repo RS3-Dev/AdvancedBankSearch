@@ -1,7 +1,7 @@
 package.path = './?.lua;./?/init.lua;' .. package.path
 -- Drive Bank Tags-style query rows, drag gestures, menus and name/icon editing.
 -- FAKE HOST: held-pointer capture and native menu rendering still need a live check.
-local Harness = require('tools/test_support/search_harness')
+local Harness = require('tests/support/search_harness')
 local h = Harness.new('query_folders')
 h:NameObjects({{101,'Iron bar'},{102,'Iron ore'},{105,'Lobster'}})
 h.bankHost:SetItems({{101,5},{102,5},{105,9}})

@@ -1,7 +1,7 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
 -- Bank Tags is independent: no dependency injection or import registration.
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 local Json = require("resources/core/json")
 local h = Harness.new("without_banktags")
 local manifestFile = assert(io.open(h.built.folder .. "/plugin.json", "rb"))

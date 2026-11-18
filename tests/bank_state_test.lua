@@ -1,7 +1,7 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
 -- FAKE HOST: exercise real Core state delivery and native page cleanup.
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 local h = Harness.new("bank_state", { separateGlobals = true, cloneExports = true })
 h:NameObjects({ { 101, "Iron bar" } })
 h.bankHost:SetItems({ { 101, 5 } })

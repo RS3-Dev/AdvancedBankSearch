@@ -4,7 +4,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 -- Combo boxes are PrettyUI's own, over a native field that sorts its labels
 
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 
 -- The editor calls only methods PrettyUI 1.2.1 defines
 local prettyRoot = Harness.PrettyUIRoot()

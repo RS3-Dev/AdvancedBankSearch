@@ -1,5 +1,5 @@
 -- Run every test and check the directly installable runtime files
--- Usage from the repository root: lua54 tools/check.lua
+-- Usage from the repository root: lua54 tests/check.lua
 -- Tests that load Bank Core read it from BANKCORE_ROOT
 -- Each test runs in its own process since host stand-ins differ
 
@@ -39,7 +39,7 @@ end
 local failures = 0
 
 -- Check the exact source runtime that users install
-local ModuleGraph = require("tools/module_graph")
+local ModuleGraph = require("tests/support/module_graph")
 local modules = ModuleGraph.PluginModules("main")
 local runtime, shipped = { "main.lua" }, { ["main.lua"] = true }
 for _, name in ipairs(modules) do

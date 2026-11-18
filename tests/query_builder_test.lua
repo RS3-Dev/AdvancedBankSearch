@@ -4,7 +4,7 @@ package.path = "./?.lua;" .. package.path
 
 local QueryBuilder = require("resources/search/query_builder")
 local Ranking = require("resources/search/ranking")
-local runeql = require("tools/test_support/runeql").Load()
+local runeql = require("tests/support/runeql").Load()
 QueryBuilder.SetCatalog(runeql)
 
 -- Build conditions, failing the test when they are refused

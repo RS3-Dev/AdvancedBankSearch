@@ -3,7 +3,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 -- Follow Bank Core and RuneQL through every load order
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 
 local h = Harness.new("plugin_reload")
 local Loader = require("tools/test_support/fake_plugin_host")

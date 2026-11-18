@@ -12,7 +12,7 @@ end
 cleanerFolder = string.gsub(cleanerFolder, "\\", "/")
 assert(io.open(cleanerFolder .. "/main.lua", "rb"), "no built Bank Cleaner at " .. cleanerFolder):close()
 
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 
 -- Check every module, subscription, and key is in its plugin's namespace
 local function checkSeparate(h, cleaner, search)

@@ -10,6 +10,15 @@ The repository root is the runtime root. `resources/app.lua` connects the plugin
 
 ## Tests
 
-See [tests/README.md](tests/README.md) for Lua 5.4, dependency paths, and test coverage. Run `lua54 tools/check.lua` from this directory. `tests/` and `tools/` are test-only and are not needed by the client.
+See [tests/README.md](tests/README.md) for Lua 5.4, dependency paths, and test coverage. Run `lua54 tests/check.lua` from this directory. `tests/` contains the test suite and its tooling, which are not needed by the client.
 
 For a runtime ZIP, archive only `main.lua`, `plugin.json`, and `resources/`, directly at the ZIP root. Tests and this README stay outside the runtime package.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+## License
+
+[BSD 2-Clause](LICENSE), copyright 2026 Advanced Bank Search contributors.
+The license notice is also included in `main.lua` so runtime packages retain it.

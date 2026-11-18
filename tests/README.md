@@ -6,7 +6,7 @@ Run every test and the compile and globals check from the repository root:
 set BANKCORE_ROOT=C:\path\to\bank-utilities
 set RUNEQL_ROOT=C:\path\to\plugins\runeql
 set PRETTYUI_ROOT=C:\path\to\prettyui-checkout
-lua54 tools/check.lua
+lua54 tests/check.lua
 ```
 
 Tests that load Bank Core read it, unchanged, from the checkout `BANKCORE_ROOT` names; there is no default, so a stale sibling checkout is never tested against by accident. They use Bank Core's own stand-in host (`tools/test_support/fake_bank_host.lua` and `fake_plugin_host.lua` in that checkout) and load Bank Core's root `main.lua` with its own module cache, beside the Advanced Bank Search repository root. Nothing from Bank Core is copied into Advanced Bank Search or its package.

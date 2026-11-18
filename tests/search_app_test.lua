@@ -3,7 +3,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 -- Drive the built Advanced Bank Search through Bank Core and RuneQL
 -- FAKE HOST: stand-in loader, components, and widgets, not the game client
 
-local Harness = require("tools/test_support/search_harness")
+local Harness = require("tests/support/search_harness")
 
 local h = Harness.new("search_app")
 local host = h.bankHost
