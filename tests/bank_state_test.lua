@@ -36,6 +36,31 @@ end
 local function available()
     return { bankOpen = true, viewAll = true, searchActive = false, filterActive = false, presetOpen = false }
 end
+
+-- Only blocked clicks request the optional Core hint; passive updates and older
+-- Core handles remain safe, and a refused hint does not replace the warning.
+local readState, highlight = app.ext.GetBankState, app.ext.HighlightAllItems
+local clickState, hints = available(), 0
+clickState.viewAll = false
+app.ext.GetBankState = function() return clickState end
+app.ext.HighlightAllItems = function() hints = hints + 1; return false, "unavailable" end
+listener(clickState)
+app:SetText("iron")
+assert(hints == 0)
+assert(not app:ChooseQuery(record.id) and hints == 1)
+assert(not app:OpenEditor(nil) and hints == 2)
+assert(app.statusIsError and app.status:find('"All Items"', 1, true))
+clickState = available()
+clickState.searchActive = true
+assert(not app:ChooseQuery(record.id) and hints == 2)
+assert(not app:OpenEditor(nil) and hints == 2)
+clickState.searchActive, clickState.viewAll = false, false
+app.ext.HighlightAllItems = nil
+assert(not app:ChooseQuery(record.id))
+assert(not app:OpenEditor(nil))
+app.ext.GetBankState, app.ext.HighlightAllItems = readState, highlight
+listener(available())
+
 for _, restriction in ipairs({ "bankOpen", "viewAll", "searchActive", "filterActive", "presetOpen" }) do
     for _, savedQuery in ipairs({ false, true }) do
         if savedQuery then assert(app:ChooseQuery(record.id)) else app:SetText("iron") end
