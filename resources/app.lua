@@ -357,10 +357,13 @@ end
 
 -- Show a new search or saved query: set its page, then open it
 -- A refusal goes to the column's status line
-function App:ShowPage(pageID)
+function App:ShowPage(pageID, userClick)
     if self.ext == nil then return false end
     local blocked = self:OnBankStateChanged(self.ext:GetBankState())
     if blocked ~= nil then
+        if userClick and blocked == "not_all_items" and self.ext.HighlightAllItems ~= nil then
+            self.ext:HighlightAllItems()
+        end
         self:ShowBankStateError(blocked)
         return false, blocked
     end
@@ -426,7 +429,7 @@ function App:ChooseQuery(queryID)
         self:Refresh()
         return false
     end
-    local opened = self:ShowPage(QUERY_PAGE)
+    local opened = self:ShowPage(QUERY_PAGE, true)
     self:Refresh()
     return opened
 end
@@ -547,7 +550,13 @@ function App:OpenEditor(record)
     self:CloseAppearance()
     if self.ext == nil then return false end
     local blocked = bankStateBlocker(self.ext:GetBankState())
-    if blocked ~= nil then self:ShowBankStateError(blocked); return false, blocked end
+    if blocked ~= nil then
+        if blocked == "not_all_items" and self.ext.HighlightAllItems ~= nil then
+            self.ext:HighlightAllItems()
+        end
+        self:ShowBankStateError(blocked)
+        return false, blocked
+    end
     local api = findDependency(bankcore, "bankcore", "Register")
     if api == nil then return false end
     self:StopSearchWait()
